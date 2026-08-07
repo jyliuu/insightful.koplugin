@@ -9,6 +9,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputText = require("ui/widget/inputtext")
+local ScrollHtmlWidget = require("ui/widget/scrollhtmlwidget")
 local Size = require("ui/size")
 local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
@@ -18,7 +19,6 @@ local _ = require("gettext")
 local source = debug.getinfo(1, "S").source
 local PLUGIN_DIR = source:match("^@(.*/)") or ""
 local Renderer = dofile(PLUGIN_DIR .. "conversation_renderer.lua")
-local HalfPageScrollHtmlWidget = dofile(PLUGIN_DIR .. "half_page_scroll_html_widget.lua")
 local Screen = Device.screen
 
 local ConversationViewer = InputContainer:extend{
@@ -136,7 +136,7 @@ function ConversationViewer:_html()
 end
 
 function ConversationViewer:_buildScrollWidget(outer_height)
-    local scroll_widget = HalfPageScrollHtmlWidget:new{
+    local scroll_widget = ScrollHtmlWidget:new{
         html_body = self:_html(),
         css = VIEWER_CSS,
         default_font_size = Screen:scaleBySize(20),
