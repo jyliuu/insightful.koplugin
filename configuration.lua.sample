@@ -1,0 +1,22 @@
+-- Copy this file to configuration.lua. That file is ignored by Git because it
+-- contains a secret.
+return {
+    -- Supply the complete OpenAI-compatible chat-completions endpoint.
+    base_url = "https://api.openai.com/v1/chat/completions",
+    model = "gpt-4.1-mini",
+    api_key = "",
+
+    timeout = 60,
+    max_tokens = 1200,
+    temperature = 0.2,
+
+    -- Show reply text as it arrives. Set false to use one blocking request.
+    stream = true,
+
+    -- Keep certificate verification enabled. Set this to false only when an old
+    -- device cannot validate the endpoint certificate and you accept the risk.
+    verify_ssl = true,
+
+    -- Optional additional headers for another OpenAI-compatible endpoint.
+    headers = {},
+}
