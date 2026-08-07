@@ -152,6 +152,68 @@ function ConversationViewer:_buildScrollWidget(outer_height)
     return scroll_widget
 end
 
+function ConversationViewer:_fixedControlsHeight()
+    return self.title_bar:getHeight()
+        + self.composer:getSize().h
+        + self.button_table:getSize().h
+end
+
+function ConversationViewer:_resizeLayout(available_height, refresh)
+    if not self.content_group then return end
+    available_height = math.max(1, math.floor(available_height or self.height))
+    local minimum_outer_height = 2 * self.text_padding
+        + 2 * self.text_margin
+        + Screen:scaleBySize(24)
+    local outer_height = math.max(
+        minimum_outer_height,
+        available_height - self:_fixedControlsHeight()
+    )
+
+    local scroll_widget = self:_buildScrollWidget(outer_height)
+    self.text_frame:clear()
+    self.text_frame[1] = scroll_widget
+    self.text_frame.dimen = nil
+    self.scroll_widget = scroll_widget
+    self.scroll_container.dimen.h = self.text_frame:getSize().h
+    self.content_group:resetLayout()
+    self.frame.dimen = nil
+    self[1].dimen.h = available_height
+    self.available_height = available_height
+    self.scroll_widget:scrollToRatio(1)
+
+    if refresh then UIManager:setDirty("all", "flashui") end
+end
+
+function ConversationViewer:_resizeForKeyboard()
+    local available_height = self.height
+    local keyboard = self.input_widget and self.input_widget.keyboard
+    if keyboard and self.input_widget:isKeyboardVisible() and keyboard.dimen then
+        available_height = available_height - keyboard.dimen.h
+    end
+    self:_resizeLayout(available_height, true)
+end
+
+function ConversationViewer:_installKeyboardLayoutHooks()
+    local keyboard = self.input_widget and self.input_widget.keyboard
+    if not keyboard then return end
+
+    local original_on_show = keyboard.onShow
+    keyboard.onShow = function(widget, ...)
+        local result
+        if original_on_show then result = original_on_show(widget, ...) end
+        if not self.closed then self:_resizeForKeyboard() end
+        return result
+    end
+
+    local original_on_close_widget = keyboard.onCloseWidget
+    keyboard.onCloseWidget = function(widget, ...)
+        local result
+        if original_on_close_widget then result = original_on_close_widget(widget, ...) end
+        if not self.closed then self:_resizeForKeyboard() end
+        return result
+    end
+end
+
 function ConversationViewer:_hideKeyboard()
     if not self.input_widget or not self.input_widget:isKeyboardVisible() then return false end
     self.input_widget:onCloseKeyboard()
@@ -250,10 +312,7 @@ function ConversationViewer:init()
         }},
     }
 
-    local outer_height = self.height
-        - self.title_bar:getHeight()
-        - self.composer:getSize().h
-        - self.button_table:getSize().h
+    local outer_height = self.height - self:_fixedControlsHeight()
     self.scroll_widget = self:_buildScrollWidget(outer_height)
     self.text_frame = FrameContainer:new{
         padding = self.text_padding,
@@ -261,29 +320,33 @@ function ConversationViewer:init()
         bordersize = 0,
         self.scroll_widget,
     }
+    self.scroll_container = CenterContainer:new{
+        dimen = Geom:new{ w = self.width, h = self.text_frame:getSize().h },
+        self.text_frame,
+    }
+    self.content_group = VerticalGroup:new{
+        self.title_bar,
+        self.scroll_container,
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = self.composer:getSize().h },
+            self.composer,
+        },
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = self.button_table:getSize().h },
+            self.button_table,
+        },
+    }
     self.frame = FrameContainer:new{
         radius = 0,
         bordersize = 0,
         padding = 0,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
-        VerticalGroup:new{
-            self.title_bar,
-            CenterContainer:new{
-                dimen = Geom:new{ w = self.width, h = self.text_frame:getSize().h },
-                self.text_frame,
-            },
-            CenterContainer:new{
-                dimen = Geom:new{ w = self.width, h = self.composer:getSize().h },
-                self.composer,
-            },
-            CenterContainer:new{
-                dimen = Geom:new{ w = self.width, h = self.button_table:getSize().h },
-                self.button_table,
-            },
-        },
+        self.content_group,
     }
     self[1] = CenterContainer:new{ dimen = self.region, self.frame }
+    self.available_height = self.height
+    self:_installKeyboardLayoutHooks()
     self.scroll_widget:scrollToRatio(1)
 end
 
@@ -294,11 +357,12 @@ function ConversationViewer:update(messages, stream_text, status, busy)
     self.status = status
     self.busy = busy == true
     self.send_button:enableDisable(not self.busy)
-    self.scroll_widget = self:_buildScrollWidget(self.text_frame:getSize().h)
-    self.text_frame:clear()
-    self.text_frame[1] = self.scroll_widget
-    self.scroll_widget:scrollToRatio(1)
+    self:_resizeLayout(self.available_height or self.height, false)
     UIManager:setDirty(self, "ui")
+end
+
+function ConversationViewer:onKeyboardHeightChanged()
+    self:_resizeForKeyboard()
 end
 
 function ConversationViewer:onShow()
