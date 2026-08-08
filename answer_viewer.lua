@@ -382,6 +382,9 @@ end
 function ConversationViewer:onClose()
     if self.closed then return true end
     self.closed = true
+    -- The virtual keyboard is a separate modal window. Remove it before
+    -- InputText:onCloseWidget frees the keyboard during viewer teardown.
+    self:_hideKeyboard()
     UIManager:close(self)
     if self.close_callback then self.close_callback() end
     return true
