@@ -22,6 +22,15 @@ local Agent = localRequire("agent")
 local AnswerViewer = localRequire("answer_viewer")
 local BookTools = localRequire("book_tools")
 local Chat = localRequire("chat")
+local ProviderRegistry = localRequire("provider_registry"):new{
+    compatible = localRequire("provider_openai_compatible"),
+    anthropic = localRequire("provider_anthropic"),
+    variants = {
+        openai = localRequire("provider_openai"),
+        deepseek = localRequire("provider_deepseek"),
+        openrouter = localRequire("provider_openrouter"),
+    },
+}
 local Storage = localRequire("storage")
 local Streaming = localRequire("streaming")
 
@@ -94,6 +103,7 @@ function BookAgent:openChat(selection, quick_action, focus_input)
         agent = Agent,
         answer_viewer_class = AnswerViewer,
         book_tools_class = BookTools,
+        provider_registry = ProviderRegistry,
         storage = self.storage,
         streaming = Streaming,
         conversation = conversation,

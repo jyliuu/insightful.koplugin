@@ -54,6 +54,7 @@ function Chat:new(options)
     instance.plugin = assert(options.plugin)
     instance.agent = assert(options.agent)
     instance.book_tools_class = assert(options.book_tools_class)
+    instance.provider_registry = assert(options.provider_registry)
     instance.storage = assert(options.storage)
     instance.viewer_class = assert(options.answer_viewer_class)
     instance.streaming = assert(options.streaming)
@@ -102,6 +103,14 @@ function Chat:_errorText(err)
         return _("The AI service returned an invalid response.")
     elseif err:find("lookup limit", 1, true) then
         return _("Book lookup limit reached.")
+    elseif err:find("output limit", 1, true) then
+        return _("The AI service reached its output limit before finishing.")
+    elseif err:find("context window", 1, true) then
+        return _("The conversation is too long for the AI service.")
+    elseif err:find("content was filtered", 1, true) or err:find("request was refused", 1, true) then
+        return _("The AI service did not complete this response.")
+    elseif err:find("Unsupported AI provider", 1, true) then
+        return err
     elseif err:find("canceled", 1, true) then
         return _("Request canceled.")
     end
@@ -243,11 +252,18 @@ function Chat:_send(question, selection, display_content)
     local stream_enabled = self.configuration.stream ~= false
         and type(self.streaming.httpPost) == "function"
     self.stream_control = stream_enabled and {} or nil
-    local provider = self.agent.newProvider(
+    local provider, provider_err = self.provider_registry:newProvider(
         self.configuration,
         self:_transport(),
         stream_enabled and self.streaming.httpPost or nil
     )
+    if not provider then
+        self.stream_control = nil
+        self.stream_status = tostring(provider_err or _("Unsupported AI provider."))
+        self.busy = false
+        self:_updateViewer()
+        return
+    end
     local answer, err, provenance = self.agent.run(self.conversation, {
         provider = provider,
         book_tools = book_tools,

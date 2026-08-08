@@ -1,14 +1,22 @@
 -- Copy this file to configuration.lua. That file is ignored by Git because it
 -- contains a secret.
 return {
-    -- Supply the complete OpenAI-compatible chat-completions endpoint.
+    -- Supported values: openai, deepseek, openrouter, anthropic.
+    provider = "openai",
+
+    -- Supply the complete endpoint for that provider.
     base_url = "https://api.openai.com/v1/chat/completions",
     model = "gpt-4.1-mini",
     api_key = "",
 
     timeout = 60,
-    max_tokens = 1200,
-    temperature = 0.2,
+
+    -- Optional generation overrides. Leave unset to use provider defaults.
+    -- max_tokens = 4096,
+    -- temperature = 0.2,
+
+    -- Optional provider-specific request fields.
+    parameters = {},
 
     -- Show reply text as it arrives. Set false to use one blocking request.
     stream = true,

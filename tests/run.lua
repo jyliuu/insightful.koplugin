@@ -4,6 +4,15 @@ local root = script:match("^(.*)/tests/run%.lua$") or "."
 local Agent = dofile(root .. "/agent.lua")
 local BookTools = dofile(root .. "/book_tools.lua")
 local ConversationRenderer = dofile(root .. "/conversation_renderer.lua")
+local ProviderRegistry = dofile(root .. "/provider_registry.lua"):new{
+    compatible = dofile(root .. "/provider_openai_compatible.lua"),
+    anthropic = dofile(root .. "/provider_anthropic.lua"),
+    variants = {
+        openai = dofile(root .. "/provider_openai.lua"),
+        deepseek = dofile(root .. "/provider_deepseek.lua"),
+        openrouter = dofile(root .. "/provider_openrouter.lua"),
+    },
+}
 local Storage = dofile(root .. "/storage.lua")
 local Streaming = dofile(root .. "/streaming.lua")
 
@@ -60,7 +69,10 @@ end
 
 test("agent executes search then read and returns final text", function()
     local provider = scriptedProvider({
-        { tool_calls = {{ id = "c1", name = "search_book", arguments = { query = "Mentor" } }} },
+        {
+            provider_state = { reasoning_content = "Find the first passage." },
+            tool_calls = {{ id = "c1", name = "search_book", arguments = { query = "Mentor" } }},
+        },
         { tool_calls = {{ id = "c2", name = "read_around", arguments = { hit_id = "h1" } }} },
         { text = "Mentor appears in the opening section." },
     })
@@ -80,6 +92,7 @@ test("agent executes search then read and returns final text", function()
     same(calls[2].name, "read_around", "second tool")
     same(provenance.tool_turns, 2, "tool turns")
     same(#provider.requests[3].messages, 5, "working message count")
+    same(provider.requests[2].messages[2].provider_state.reasoning_content, "Find the first passage.", "provider state replay")
 end)
 
 test("multiple tool calls execute before the next provider turn", function()
@@ -153,16 +166,18 @@ test("failed book tool is returned to the model as a failure", function()
     same(answer, "The book could not be searched.", "answer after tool failure")
 end)
 
-test("OpenAI-compatible provider returns neutral native tool calls", function()
+test("DeepSeek adapter returns neutral tool calls and preserves reasoning state", function()
     local previous_json = package.loaded.json
+    local encoded_body
     package.loaded.json = {
-        encode = function() return "encoded-request" end,
+        encode = function(value) encoded_body = value; return "encoded-request" end,
         decode = function(text)
             if text == "provider-response" then
                 return {
                     choices = {{
                         message = {
                             content = nil,
+                            reasoning_content = "Use the book search tool.",
                             tool_calls = {{
                                 id = "call-1",
                                 ["function"] = { name = "search_book", arguments = "tool-arguments" },
@@ -177,7 +192,8 @@ test("OpenAI-compatible provider returns neutral native tool calls", function()
         end,
     }
     local captured
-    local provider = Agent.newProvider({
+    local provider = ProviderRegistry:newProvider({
+        provider = "deepseek",
         base_url = "https://example.test/v1/chat/completions",
         model = "test-model",
         api_key = "secret",
@@ -194,9 +210,96 @@ test("OpenAI-compatible provider returns neutral native tool calls", function()
     same(err, nil, "provider error")
     same(response.tool_calls[1].name, "search_book", "neutral tool name")
     same(response.tool_calls[1].arguments.query, "Mentor", "decoded tool arguments")
+    same(response.provider_state.reasoning_content, "Use the book search tool.", "provider reasoning state")
     same(captured.url, "https://example.test/v1/chat/completions", "request URL")
     same(captured.body, "encoded-request", "encoded body")
+    same(encoded_body.max_tokens, nil, "default request has no output-token cap")
+    same(encoded_body.temperature, nil, "default request has no temperature override")
+    same(encoded_body.tool_choice, nil, "provider chooses its default tool behavior")
     contains(captured.headers.Authorization, "Bearer", "authorization header")
+end)
+
+test("OpenAI and OpenRouter adapters use their own token field", function()
+    local previous_json = package.loaded.json
+    local encoded_body
+    package.loaded.json = {
+        encode = function(value) encoded_body = value; return "request" end,
+        decode = function(value)
+            if value == "response" then
+                return { choices = {{ finish_reason = "stop", message = { content = "Done." } }} }
+            end
+            error("unexpected JSON: " .. tostring(value))
+        end,
+    }
+    for _, provider_id in ipairs({ "openai", "openrouter" }) do
+        local provider = ProviderRegistry:newProvider({
+            provider = provider_id,
+            base_url = "https://example.test/v1/chat/completions",
+            model = "test-model",
+            api_key = "secret",
+            max_tokens = 2500,
+            stream = false,
+        }, function() return true, 200, "response", "OK" end)
+        local response, err = provider:chat{ system = "system", messages = {}, tools = {} }
+        same(err, nil, provider_id .. " error")
+        same(response.text, "Done.", provider_id .. " text")
+        same(encoded_body.max_completion_tokens, 2500, provider_id .. " token field")
+        same(encoded_body.max_tokens, nil, provider_id .. " legacy token field absent")
+    end
+    package.loaded.json = previous_json
+end)
+
+test("Anthropic adapter uses Messages headers, body, stream, and tool blocks", function()
+    local previous_json = package.loaded.json
+    local encoded_body
+    local decoded = {
+        tool = {
+            type = "content_block_start",
+            index = 0,
+            content_block = { type = "tool_use", id = "call-a", name = "toc", input = {} },
+        },
+        args = {
+            type = "content_block_delta",
+            index = 0,
+            delta = { type = "input_json_delta", partial_json = "{}" },
+        },
+        stop = { type = "message_delta", delta = { stop_reason = "tool_use" } },
+    }
+    package.loaded.json = {
+        encode = function(value) encoded_body = value; return "anthropic-request" end,
+        decode = function(value)
+            if decoded[value] then return decoded[value] end
+            if value == "{}" then return {} end
+            error("unexpected JSON: " .. tostring(value))
+        end,
+    }
+    local captured_headers
+    local provider = ProviderRegistry:newProvider({
+        provider = "anthropic",
+        base_url = "https://api.anthropic.com/v1/messages",
+        model = "claude-test",
+        api_key = "secret",
+    }, function() error("blocking transport should not run") end, function(_, headers, body, _, _, on_chunk)
+        captured_headers = headers
+        same(body, "anthropic-request", "Anthropic request body")
+        on_chunk("event: content_block_start\ndata: tool\n\n")
+        on_chunk("event: content_block_delta\ndata: args\n\nevent: message_delta\ndata: stop\n\n")
+        return true, 200, "", "OK"
+    end)
+    local response, err = provider:chat({
+        system = "system",
+        messages = {{ role = "user", content = "question" }},
+        tools = Agent.tool_schemas,
+    }, function() end, {})
+    package.loaded.json = previous_json
+    same(err, nil, "Anthropic stream error")
+    same(response.tool_calls[1].name, "toc", "Anthropic neutral tool name")
+    same(captured_headers["x-api-key"], "secret", "Anthropic API key header")
+    same(captured_headers["anthropic-version"], "2023-06-01", "Anthropic version header")
+    same(captured_headers.Authorization, nil, "Anthropic bearer header absent")
+    same(encoded_body.system, "system", "Anthropic top-level system prompt")
+    same(encoded_body.max_tokens, 8192, "Anthropic required token limit")
+    same(encoded_body.tools[1].input_schema.type, "object", "Anthropic tool schema")
 end)
 
 test("stream frame decoder preserves split payloads and status", function()
@@ -212,24 +315,40 @@ end)
 
 test("SSE accumulator joins split text without exposing reasoning", function()
     local decoded = {
-        first = { choices = {{ delta = { reasoning_content = "private", content = "Hello" } }} },
+        first = { choices = {{ delta = { reasoning_content = "private ", content = "Hello" } }} },
+        thought = { choices = {{ delta = { reasoning_content = "reasoning" } }} },
         second = { choices = {{ delta = { content = " world" } }} },
     }
     local deltas = {}
     local activity = {}
-    local accumulator = Agent.newStreamAccumulator(
+    local provider = ProviderRegistry:newProvider({ provider = "deepseek", api_key = "x", base_url = "x", model = "x" }, function() end)
+    local accumulator = provider:_newStreamAccumulator(
         { decode = function(value) return assert(decoded[value]) end },
         function(delta) table.insert(deltas, delta) end,
         function(kind) table.insert(activity, kind) end
     )
     truthy(accumulator:feed("data: fir"), "first partial SSE chunk")
-    truthy(accumulator:feed("st\r\n\r\ndata: second\n\ndata: [DONE]\n\n"), "second SSE chunk")
+    truthy(accumulator:feed("st\r\n\r\ndata: thought\n\ndata: second\n\ndata: [DONE]\n\n"), "second SSE chunk")
     local response, err = accumulator:finish()
     same(err, nil, "stream accumulator error")
     same(response.text, "Hello world", "joined streamed text")
+    same(response.provider_state.reasoning_content, "private reasoning", "hidden reasoning retained for tool replay")
     same(table.concat(deltas), "Hello world", "live deltas")
     same(activity[1], "reasoning", "hidden reasoning activity")
     truthy(not response.text:find("private", 1, true), "reasoning is not returned")
+end)
+
+test("stream output-limit stop is not accepted as a complete answer", function()
+    local decoded = {
+        text = { choices = {{ delta = { content = "Partial answer" } }} },
+        limit = { choices = {{ delta = {}, finish_reason = "length" }} },
+    }
+    local provider = ProviderRegistry:newProvider({ provider = "deepseek", api_key = "x", base_url = "x", model = "x" }, function() end)
+    local accumulator = provider:_newStreamAccumulator({ decode = function(value) return assert(decoded[value]) end })
+    truthy(accumulator:feed("data: text\n\ndata: limit\n\ndata: [DONE]\n\n"), "limited stream feed")
+    local response, err = accumulator:finish()
+    same(response, nil, "limited stream response")
+    contains(err, "output limit", "limited stream error")
 end)
 
 test("SSE accumulator rebuilds fragmented native tool calls", function()
@@ -253,7 +372,8 @@ test("SSE accumulator rebuilds fragmented native tool calls", function()
         end,
     }
     local tool_deltas = {}
-    local accumulator = Agent.newStreamAccumulator(json, nil, nil, function(call)
+    local provider = ProviderRegistry:newProvider({ provider = "openai", api_key = "x", base_url = "x", model = "x" }, function() end)
+    local accumulator = provider:_newStreamAccumulator(json, nil, nil, function(call)
         table.insert(tool_deltas, call)
     end)
     truthy(accumulator:feed("data: tool1\n\ndata: tool2\n\n"), "tool SSE")
@@ -278,10 +398,13 @@ test("provider requests SSE and emits text deltas", function()
         end,
     }
     local request_headers
-    local provider = Agent.newProvider({
+    local provider = ProviderRegistry:newProvider({
+        provider = "deepseek",
         base_url = "https://example.test/v1/chat/completions",
         model = "test-model",
         api_key = "secret",
+        max_tokens = 2400,
+        temperature = 0.2,
     }, function() error("blocking transport should not run") end, function(_, headers, body, _, _, on_chunk)
         request_headers = headers
         same(body, "encoded-stream-request", "stream request body")
@@ -300,6 +423,8 @@ test("provider requests SSE and emits text deltas", function()
     same(response.text, "Live answer", "stream provider text")
     same(table.concat(deltas), "Live answer", "stream provider deltas")
     same(encoded_body.stream, true, "stream request flag")
+    same(encoded_body.max_tokens, 2400, "configured output-token cap")
+    same(encoded_body.temperature, 0.2, "configured temperature override")
     same(request_headers.Accept, "text/event-stream", "stream accept header")
 end)
 
@@ -628,6 +753,10 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     main_file:close()
     contains(main_source, 'localRequire("streaming")', "stream transport loaded")
     contains(main_source, 'localRequire("answer_viewer")', "answer viewer loaded")
+    contains(main_source, 'localRequire("provider_openai")', "OpenAI provider loaded")
+    contains(main_source, 'localRequire("provider_deepseek")', "DeepSeek provider loaded")
+    contains(main_source, 'localRequire("provider_openrouter")', "OpenRouter provider loaded")
+    contains(main_source, 'localRequire("provider_anthropic")', "Anthropic provider loaded")
 end)
 
 test("batched search never returns more than the global hit cap", function()

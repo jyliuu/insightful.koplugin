@@ -1,6 +1,6 @@
 # BookAgent for KOReader
 
-BookAgent gives each book one persistent AI conversation. A highlighted passage can enter the conversation through one of five actions. The OpenAI-compatible model can answer directly or call five bounded tools against the open KOReader document:
+BookAgent gives each book one persistent AI conversation. A highlighted passage can enter the conversation through one of five actions. OpenAI, DeepSeek, OpenRouter, and Anthropic models can answer directly or call five bounded tools against the open KOReader document:
 
 - `search_book`
 - `read_around`
@@ -14,8 +14,17 @@ The plugin does not index books, create embeddings, send a whole book automatica
 
 1. Copy this directory to `koreader/plugins/bookagent.koplugin`.
 2. Copy `configuration.lua.sample` to `configuration.lua`.
-3. Set `base_url`, `model`, and `api_key` in `configuration.lua`.
+3. Set `provider`, `base_url`, `model`, and `api_key` in `configuration.lua`.
 4. Restart KOReader.
+
+Each provider has its own request and stream adapter:
+
+- `openai`: OpenAI Chat Completions at `https://api.openai.com/v1/chat/completions`.
+- `deepseek`: DeepSeek Chat Completions at `https://api.deepseek.com/chat/completions`.
+- `openrouter`: OpenRouter Chat Completions at `https://openrouter.ai/api/v1/chat/completions`.
+- `anthropic`: Anthropic Messages at `https://api.anthropic.com/v1/messages`.
+
+OpenAI, DeepSeek, and OpenRouter omit output-token and temperature settings unless you set them. Anthropic requires `max_tokens` in every Messages request; BookAgent uses `8192` when it is unset. Provider-specific body fields can be placed in `parameters`. Custom HTTP headers can be placed in `headers`.
 
 Highlight text and tap `AI`. The main KOReader menu also contains `BookAgent` so a conversation can be reopened without selecting text.
 
@@ -37,4 +46,4 @@ Run:
 ./scripts/test.sh
 ```
 
-These checks cover the agent loop, multiple calls in one turn, budgets, malformed responses, failed tools, hyperlink normalization and position restoration, quick actions, streamed SSE text, hidden-reasoning activity, streamed tool calls, transport framing, conversation HTML structure, Markdown viewer wiring, and per-book persistence. They do not prove final display geometry, live network behavior, or document extraction on a physical Kindle.
+These checks cover the agent loop, multiple calls in one turn, budgets, malformed responses, failed tools, OpenAI/DeepSeek/OpenRouter/Anthropic request shapes, provider-specific headers, streamed SSE text, hidden provider state, streamed tool calls, output-limit detection, transport framing, hyperlink normalization and position restoration, quick actions, conversation HTML structure, Markdown viewer wiring, and per-book persistence. They do not prove final display geometry, live network behavior, or document extraction on a physical Kindle.
