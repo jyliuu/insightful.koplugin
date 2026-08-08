@@ -181,7 +181,7 @@ function Streaming.httpPost(url, headers, body, timeout, verify_ssl, on_chunk, c
     local raw_body = table.concat(raw_parts)
     if cancelled then return false, nil, raw_body, "Request canceled." end
     if stream_error then
-        logger.warn("BookAgent stream framing failed:", stream_error)
+        logger.warn("Insightful stream framing failed:", stream_error)
         return false, decoder.status_code, raw_body, stream_error
     end
     local finished, finish_error = Streaming.finishFrames(decoder)

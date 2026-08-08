@@ -256,7 +256,7 @@ function ConversationViewer:init()
         width = self.width,
         align = "left",
         with_bottom_line = true,
-        title = self.title or _("BookAgent conversation"),
+        title = self.title or _("Insightful conversation"),
         title_multilines = true,
         close_callback = function() self:onClose() end,
         show_parent = self,
@@ -265,7 +265,7 @@ function ConversationViewer:init()
     self.input_widget = InputText:new{
         parent = self,
         text = "",
-        hint = _("Message BookAgent…"),
+        hint = _("Message Insightful…"),
         width = math.floor(self.width * 0.72),
         height = Screen:scaleBySize(72),
         scroll = true,

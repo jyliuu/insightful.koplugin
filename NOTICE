@@ -1,12 +1,12 @@
-BookAgent for KOReader
+Insightful for KOReader
 Copyright (C) 2026 Jinyang Liu
 
-BookAgent is licensed under the GNU General Public License version 3.
+Insightful is licensed under the GNU General Public License version 3.
 See LICENSE for the full terms.
 
 Related work
 
-BookAgent's design was informed by these KOReader AI plugins:
+Insightful's design was informed by these KOReader AI plugins:
 
 * KOAssistant by zeeyado and its contributors
   https://github.com/zeeyado/koassistant.koplugin
@@ -16,4 +16,4 @@ BookAgent's design was informed by these KOReader AI plugins:
 
 Both related projects are licensed under the GNU General Public License
 version 3. Their authors and contributors retain copyright in their work.
-They are not bundled with BookAgent.
+They are not bundled with Insightful.

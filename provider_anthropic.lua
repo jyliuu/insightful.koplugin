@@ -191,9 +191,9 @@ end
 
 function Anthropic:chat(request, on_delta, stream_control, on_activity, on_tool_delta)
     local config = self.configuration
-    if trim(config.api_key) == "" then return nil, "BookAgent is not configured: API key is missing." end
+    if trim(config.api_key) == "" then return nil, "Insightful is not configured: API key is missing." end
     if trim(config.base_url) == "" or trim(config.model) == "" then
-        return nil, "BookAgent is not configured: base_url or model is missing."
+        return nil, "Insightful is not configured: base_url or model is missing."
     end
     local json = require("json")
     local body = {

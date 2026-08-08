@@ -9,7 +9,7 @@ local source = debug.getinfo(1, "S").source
 local PLUGIN_DIR = source:match("^@(.*/)") or ""
 
 local function localRequire(name)
-    local key = "bookagent." .. name
+    local key = "insightful." .. name
     if package.loaded[key] then return package.loaded[key] end
     local chunk, err = loadfile(PLUGIN_DIR .. name .. ".lua")
     if not chunk then error(err) end
@@ -34,8 +34,8 @@ local ProviderRegistry = localRequire("provider_registry"):new{
 local Storage = localRequire("storage")
 local Streaming = localRequire("streaming")
 
-local BookAgent = WidgetContainer:extend{
-    name = "bookagent",
+local Insightful = WidgetContainer:extend{
+    name = "insightful",
     is_doc_only = true,
 }
 
@@ -43,11 +43,11 @@ local function loadConfiguration()
     local path = PLUGIN_DIR .. "configuration.lua"
     local ok, result = pcall(dofile, path)
     if ok and type(result) == "table" then return result end
-    logger.info("BookAgent: configuration.lua not loaded; chat remains available but requests require configuration")
+    logger.info("Insightful: configuration.lua not loaded; chat remains available but requests require configuration")
     return {}
 end
 
-function BookAgent:init()
+function Insightful:init()
     self.configuration = loadConfiguration()
     self.storage = Storage.forUI(self.ui)
     if self.ui.menu then self.ui.menu:registerToMainMenu(self) end
@@ -66,7 +66,7 @@ function BookAgent:init()
     end
 end
 
-function BookAgent:captureSelection(reader_highlight)
+function Insightful:captureSelection(reader_highlight)
     local selected = reader_highlight and reader_highlight.selected_text
     if not selected or type(selected.text) ~= "string" then return nil end
     local text = util.cleanupSelectedText(selected.text)
@@ -93,11 +93,11 @@ function BookAgent:captureSelection(reader_highlight)
     }
 end
 
-function BookAgent:openChat(selection, quick_action, focus_input)
+function Insightful:openChat(selection, quick_action, focus_input)
     if self.active_chat then self.active_chat:close() end
     local book = self.storage:getBook(self.ui)
     local conversation, load_err = self.storage:load(book)
-    if load_err then logger.warn("BookAgent: conversation load warning:", load_err) end
+    if load_err then logger.warn("Insightful: conversation load warning:", load_err) end
     local chat = Chat:new{
         plugin = self,
         agent = Agent,
@@ -119,7 +119,7 @@ function BookAgent:openChat(selection, quick_action, focus_input)
     chat:show(focus_input, quick_action)
 end
 
-function BookAgent:showHighlightActions(selection)
+function Insightful:showHighlightActions(selection)
     local action_dialog
     local function choose(action, focus_input)
         UIManager:close(action_dialog)
@@ -144,17 +144,17 @@ function BookAgent:showHighlightActions(selection)
     UIManager:show(action_dialog)
 end
 
-function BookAgent:addToMainMenu(menu_items)
-    menu_items.bookagent = {
-        text = _("BookAgent"),
+function Insightful:addToMainMenu(menu_items)
+    menu_items.insightful = {
+        text = _("Insightful"),
         callback = function() self:openChat(nil, nil, true) end,
     }
 end
 
-function BookAgent:onClose()
+function Insightful:onClose()
     if self.active_chat then self.active_chat:close() end
 end
 
-BookAgent.onCloseWidget = BookAgent.onClose
+Insightful.onCloseWidget = Insightful.onClose
 
-return BookAgent
+return Insightful

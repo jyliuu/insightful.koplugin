@@ -75,7 +75,7 @@ end
 
 function Chat:_save()
     local ok, err = self.storage:save(self.conversation)
-    if not ok then logger.warn("BookAgent: conversation save failed:", err) end
+    if not ok then logger.warn("Insightful: conversation save failed:", err) end
     return ok, err
 end
 
@@ -94,7 +94,7 @@ end
 function Chat:_errorText(err)
     err = tostring(err or "")
     if err:find("API key is missing", 1, true) then
-        return _("BookAgent is not configured. Copy configuration.lua.sample to configuration.lua and set api_key.")
+        return _("Insightful is not configured. Copy configuration.lua.sample to configuration.lua and set api_key.")
     elseif err:find("HTTP 401", 1, true) or err:find("HTTP 403", 1, true) then
         return _("The AI service rejected the API key.")
     elseif err:find("invalid JSON", 1, true) or err:find("invalid response", 1, true) then
@@ -135,7 +135,7 @@ function Chat:_showConversation()
     end
     local viewer
     viewer = self.viewer_class:new{
-        title = _("BookAgent — ") .. tostring(self.conversation.book.title or _("Book")),
+        title = _("Insightful — ") .. tostring(self.conversation.book.title or _("Book")),
         messages = self.conversation.messages,
         stream_text = self.stream_text,
         status = self.stream_status,
@@ -229,7 +229,7 @@ function Chat:_send(question, selection, display_content)
     if question == "" or self.busy or self.closed then return end
     if not self.context.ui or self.context.ui.document ~= self.context.document then
         self.stream_text = ""
-        self.stream_status = _("The open document changed. Reopen BookAgent from the current book.")
+        self.stream_status = _("The open document changed. Reopen Insightful from the current book.")
         self:_showConversation()
         self:_updateViewer()
         return
@@ -305,7 +305,7 @@ function Chat:_send(question, selection, display_content)
             self.stream_status = _("Answer received, but saving failed: ") .. tostring(save_err or _("unknown error"))
         end
     else
-        logger.warn("BookAgent: request failed:", err)
+        logger.warn("Insightful: request failed:", err)
         self.stream_text = ""
         self.stream_status = self:_errorText(err)
     end

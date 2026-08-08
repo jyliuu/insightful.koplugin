@@ -1,4 +1,4 @@
-# BookAgent Working Instructions
+# Insightful Working Instructions
 
 This file applies to this repository.
 

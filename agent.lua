@@ -211,7 +211,7 @@ function Agent.run(conversation, options)
             tool_calls = {},
         }
         for index, call in ipairs(calls) do
-            local call_id = call.id or string.format("bookagent-%d-%d", tool_turns, index)
+            local call_id = call.id or string.format("insightful-%d-%d", tool_turns, index)
             table.insert(assistant_turn.tool_calls, {
                 id = call_id,
                 name = call.name,

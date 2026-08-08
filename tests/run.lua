@@ -502,7 +502,7 @@ end
 test("conversations are isolated by book and persist all fields", function()
     local factory = memorySettingsFactory()
     local storage = Storage:new{
-        root = "/virtual/bookagent/conversations",
+        root = "/virtual/insightful/conversations",
         settings_factory = factory,
         make_path = function() end,
     }
@@ -528,6 +528,27 @@ test("conversations are isolated by book and persist all fields", function()
     same(#reloaded.messages, 2, "message count")
     same(reloaded.messages[1].selection.text, "passage", "selection text")
     same(reloaded.messages[1].selection.locator, "xp-3", "selection locator")
+end)
+
+test("old BookAgent conversations load and save under Insightful", function()
+    local factory, files = memorySettingsFactory()
+    files["/virtual/bookagent/conversations/aaa.lua"] = {
+        version = Storage.VERSION,
+        book = { id = "aaa", title = "Old title" },
+        messages = { { role = "user", content = "Saved before rename" } },
+    }
+    local storage = Storage:new{
+        root = "/virtual/insightful/conversations",
+        legacy_root = "/virtual/bookagent/conversations",
+        settings_factory = factory,
+        make_path = function() end,
+    }
+    local book = storage:getBook(fakeUI("aaa", "/books/a.epub", "Book A"))
+    local conversation = storage:load(book)
+    same(conversation.book.title, "Book A", "current book metadata")
+    same(conversation.messages[1].content, "Saved before rename", "legacy message")
+    truthy(storage:save(conversation), "save migrated conversation")
+    truthy(files["/virtual/insightful/conversations/aaa.lua"], "new conversation file")
 end)
 
 test("book tools expose bounded search, read, links, toc, and position", function()
@@ -721,7 +742,7 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     contains(viewer_source, "InputText:new", "embedded chat input")
     truthy(not viewer_source:find("HalfPageScrollHtmlWidget", 1, true), "standard full-page navigation")
     contains(viewer_source, 'id = "send"', "Send button")
-    contains(viewer_source, "Message BookAgent", "chat input hint")
+    contains(viewer_source, "Message Insightful", "chat input hint")
     contains(viewer_source, "self:_hideKeyboard()", "conversation tap dismisses keyboard")
     contains(viewer_source, "isKeyboardVisible", "keyboard dismissal checks visibility")
     contains(viewer_source, "is_always_active = true", "chat receives events below modal keyboard")

@@ -1,50 +1,52 @@
-# BookAgent for KOReader
+# Insightful for KOReader
 
-BookAgent is a simple, lightweight AI reading harness for KOReader. Instead of putting the whole book into every prompt, it gives the LLM five specific ways to read the book you have open.
+Insightful is a simple, lightweight AI reading harness for KOReader. Instead of putting the whole book into every prompt, it gives the LLM five specific ways to read the book you have open.
 
 Ask who Adeimantus is, for example. The LLM can search for his name and read the passages around a few matches. It can then answer from those passages. If it needs more context, it can search again. Each lookup appears on screen as an **AGENT ACTION**, so you can see which parts of the book went into the answer.
 
-BookAgent keeps this job narrow. Here is how it compares with two broader KOReader AI plugins.
+Insightful keeps this job narrow. Here is how it compares with two broader KOReader AI plugins.
 
 | Plugin | Main design | Local book tools | Web search | Wider features |
 | --- | --- | --- | --- | --- |
-| BookAgent | A small reading harness with one conversation for each book | Five tools that the model can call | No | Focused on the open book and the current conversation |
+| Insightful | A small reading harness with one conversation for each book | Five tools that the model can call | No | Focused on the open book and the current conversation |
 | [KOAssistant](https://github.com/zeeyado/koassistant.koplugin) | A full AI reading suite | Three book tools with automatic and manual modes | Yes | X-Ray, summaries, recap, library tools, artifacts, and more |
 | [Assistant](https://github.com/omer-faruq/assistant.koplugin) | A general AI helper for selected text and book actions | No model-directed local book tool loop | Yes | Translation, dictionary, Term X-Ray, recap, custom prompts, and more |
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/images/bookagent-01-highlight-ai.png" alt="A passage selected in KOReader with the AI sparkle action visible"><br>
+      <img src="docs/images/insightful-01-highlight-ai.png" alt="A passage selected in KOReader with the AI sparkle action visible"><br>
       <sub>Select a passage</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/images/bookagent-02-actions.png" alt="BookAgent quick action menu for a selected passage"><br>
+      <img src="docs/images/insightful-02-actions.png" alt="Insightful quick action menu for a selected passage"><br>
       <sub>Choose an action or ask a question</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/images/bookagent-05-agent-action.png" alt="BookAgent showing a completed read_around call while waiting for the model response"><br>
+      <img src="docs/images/insightful-05-agent-action.png" alt="Insightful showing a completed read_around call while waiting for the model response"><br>
       <sub>See which part of the book the LLM reads</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/images/bookagent-04-answer.png" alt="BookAgent conversation showing a selected passage and an AI answer"><br>
+      <img src="docs/images/insightful-04-answer.png" alt="Insightful conversation showing a selected passage and an AI answer"><br>
       <sub>Keep one conversation for each book</sub>
     </td>
   </tr>
 </table>
 
-BookAgent works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not build an index, create embeddings, or run jobs in the background. Each book gets one conversation that you can close and return to later.
+Insightful works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not build an index, create embeddings, or run jobs in the background. Each book gets one conversation that you can close and return to later.
 
 ## Install
 
-1. Copy this directory to `koreader/plugins/bookagent.koplugin` on the device.
+1. Copy this directory to `koreader/plugins/insightful.koplugin` on the device.
 2. Copy `configuration.lua.sample` to `configuration.lua`.
 3. Add your provider, endpoint, model, and API key to `configuration.lua`.
 4. Restart KOReader and open a book.
 
-You should now see **BookAgent** in the reader menu. Select some text and **AI** should also appear in the highlight menu.
+You should now see **Insightful** in the reader menu. Select some text and **AI** should also appear in the highlight menu.
+
+If you are upgrading from BookAgent, rename the old `bookagent.koplugin` directory to `insightful.koplugin`. Insightful will read conversations from the old settings path and save later changes under the new name.
 
 `configuration.lua` contains your API key, so keep it private. Git already ignores it.
 
@@ -72,27 +74,27 @@ return {
 }
 ```
 
-The sample configuration includes the less common settings, such as timeouts, extra request fields, and HTTP headers. BookAgent leaves the output token limit and temperature unset for OpenAI, DeepSeek, and OpenRouter unless you choose values yourself. Anthropic requires `max_tokens`, so BookAgent uses `8192` when you leave it out.
+The sample configuration includes the less common settings, such as timeouts, extra request fields, and HTTP headers. Insightful leaves the output token limit and temperature unset for OpenAI, DeepSeek, and OpenRouter unless you choose values yourself. Anthropic requires `max_tokens`, so Insightful uses `8192` when you leave it out.
 
-## Read with BookAgent
+## Read with Insightful
 
 Select a passage and tap **AI**. Under Zen UI, this is the sparkle icon. The menu gives you a few useful shortcuts. **Explain** deals with the passage as a whole, while **Explain terms** focuses on its vocabulary. Use **Context / history** for the setting or ideas behind a passage. Use **People / characters** when you need to know who someone is.
 
-Choose **Ask AI…** when you want to write the question yourself. The conversation opens with the keyboard closed. Tap **Message BookAgent…** to start typing. The message field stays above the keyboard, and a tap in the conversation closes the keyboard again.
+Choose **Ask AI…** when you want to write the question yourself. The conversation opens with the keyboard closed. Tap **Message Insightful…** to start typing. The message field stays above the keyboard, and a tap in the conversation closes the keyboard again.
 
-The four shortcuts send their questions immediately. They do not create separate chats. Open **BookAgent** from the reader menu whenever you want to continue the conversation for the current book.
+The four shortcuts send their questions immediately. They do not create separate chats. Open **Insightful** from the reader menu whenever you want to continue the conversation for the current book.
 
 ## See what the model reads
 
-After you send a question, the provider can start writing an answer or ask BookAgent to read something. Provider code cannot call KOReader directly. It can only ask for one of the five functions below.
+After you send a question, the provider can start writing an answer or ask Insightful to read something. Provider code cannot call KOReader directly. It can only ask for one of the five functions below.
 
-BookAgent checks the request and runs the function against the open document. It then returns a limited amount of text to the provider. The provider can ask for another function or finish the answer.
+Insightful checks the request and runs the function against the open document. It then returns a limited amount of text to the provider. The provider can ask for another function or finish the answer.
 
 ```text
-model → tool request → BookAgent → open document → limited result → model
+model → tool request → Insightful → open document → limited result → model
 ```
 
-| Function | What BookAgent does |
+| Function | What Insightful does |
 | --- | --- |
 | `search_book` | Searches the open book for one or more phrases and returns a limited number of matches. |
 | `read_around` | Reads a short section around a page, location, search match, or internal link. |
@@ -100,29 +102,29 @@ model → tool request → BookAgent → open document → limited result → mo
 | `toc` | Reads the table of contents. |
 | `current_position` | Reports your current reading position. |
 
-A request often goes from `search_book` to `read_around` and then to the answer. The model may stop sooner or make another call, but BookAgent limits how much it can read in one request.
+A request often goes from `search_book` to `read_around` and then to the answer. The model may stop sooner or make another call, but Insightful limits how much it can read in one request.
 
-The **AGENT ACTION** block is a record of calls that BookAgent actually ran. You see the function name and the useful argument for that call. A search shows its query. A read shows the page, match, link, or location. Private reasoning from the provider stays hidden.
+The **AGENT ACTION** block is a record of calls that Insightful actually ran. You see the function name and the useful argument for that call. A search shows its query. A read shows the page, match, link, or location. Private reasoning from the provider stays hidden.
 
-`list_links` starts on the current page unless the model gives it another location. Internal links get temporary IDs so `read_around` can follow them. External URLs are shown but never opened. When BookAgent moves through a reflowable document to inspect another location, it returns you to the place where you were reading.
+`list_links` starts on the current page unless the model gives it another location. Internal links get temporary IDs so `read_around` can follow them. External URLs are shown but never opened. When Insightful moves through a reflowable document to inspect another location, it returns you to the place where you were reading.
 
 ## Conversations and privacy
 
 Your turns appear in gray blocks marked **YOU**, with model replies under **AI**. Replies can contain headings, lists, links, quotes, code blocks, and tables. Text arrives in short batches instead of making the Kindle wait for the complete answer.
 
-BookAgent saves the conversation in KOReader's settings directory.
+Insightful saves the conversation in KOReader's settings directory.
 
 ```text
-bookagent/conversations/<book-id>.lua
+insightful/conversations/<book-id>.lua
 ```
 
-KOReader's stored partial checksum is normally used as the book ID. BookAgent saves your questions and the model's replies. Text fetched by a book function is kept only for the active request and is not copied into the conversation file.
+KOReader's stored partial checksum is normally used as the book ID. Insightful saves your questions and the model's replies. Text fetched by a book function is kept only for the active request and is not copied into the conversation file.
 
-The provider may receive the passage you selected, your question, earlier conversation turns, and text returned by a book function. BookAgent never uploads the full book on its own.
+The provider may receive the passage you selected, your question, earlier conversation turns, and text returned by a book function. Insightful never uploads the full book on its own.
 
 ## Zen UI
 
-Turn on **AI assistant** in Zen UI's highlight settings. BookAgent uses this slot so the sparkle icon stays in Zen UI's custom highlight menu.
+Turn on **AI assistant** in Zen UI's highlight settings. Insightful uses this slot so the sparkle icon stays in Zen UI's custom highlight menu.
 
 ## Development
 
@@ -136,4 +138,4 @@ The script runs the same tests under LuaJIT and Lua, then parses every Lua file.
 
 ## License and notice
 
-BookAgent is licensed under the [GNU General Public License version 3](LICENSE). See [NOTICE](NOTICE) for copyright and related project credits.
+Insightful is licensed under the [GNU General Public License version 3](LICENSE). See [NOTICE](NOTICE) for copyright and related project credits.
