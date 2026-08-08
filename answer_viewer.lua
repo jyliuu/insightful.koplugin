@@ -158,7 +158,7 @@ function ConversationViewer:_fixedControlsHeight()
         + self.button_table:getSize().h
 end
 
-function ConversationViewer:_resizeLayout(available_height, refresh)
+function ConversationViewer:_resizeLayout(available_height, refresh, page_number)
     if not self.content_group then return end
     available_height = math.max(1, math.floor(available_height or self.height))
     local minimum_outer_height = 2 * self.text_padding
@@ -179,7 +179,13 @@ function ConversationViewer:_resizeLayout(available_height, refresh)
     self.frame.dimen = nil
     self[1].dimen.h = available_height
     self.available_height = available_height
-    self.scroll_widget:scrollToRatio(1)
+    if page_number then
+        local page_count = math.max(1, self.scroll_widget.htmlbox_widget.page_count)
+        page_number = math.max(1, math.min(page_number, page_count))
+        self.scroll_widget:scrollToRatio((page_number - 1) / page_count)
+    else
+        self.scroll_widget:scrollToRatio(1)
+    end
 
     if refresh then UIManager:setDirty("all", "flashui") end
 end
@@ -352,12 +358,15 @@ end
 
 function ConversationViewer:update(messages, stream_text, status, busy)
     if self.closed then return end
+    local page_number = self.scroll_widget
+        and self.scroll_widget.htmlbox_widget
+        and self.scroll_widget.htmlbox_widget.page_number
     self.messages = messages or self.messages
     self.stream_text = stream_text
     self.status = status
     self.busy = busy == true
     self.send_button:enableDisable(not self.busy)
-    self:_resizeLayout(self.available_height or self.height, false)
+    self:_resizeLayout(self.available_height or self.height, false, page_number)
     UIManager:setDirty(self, "ui")
 end
 
