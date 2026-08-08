@@ -1,49 +1,139 @@
 # BookAgent for KOReader
 
-BookAgent gives each book one persistent AI conversation. A highlighted passage can enter the conversation through one of five actions. OpenAI, DeepSeek, OpenRouter, and Anthropic models can answer directly or call five bounded tools against the open KOReader document:
+BookAgent is a simple, lightweight AI reading harness for KOReader. Instead of putting the whole book into every prompt, it gives the LLM five specific ways to read the book you have open.
 
-- `search_book`
-- `read_around`
-- `list_links`
-- `toc`
-- `current_position`
+Ask who Adeimantus is, for example. The LLM can search for his name and read the passages around a few matches. It can then answer from those passages. If it needs more context, it can search again. Each lookup appears on screen as an **AGENT ACTION**, so you can see which parts of the book went into the answer.
 
-The plugin does not index books, create embeddings, send a whole book automatically, run background work, or create multiple conversations per book.
+BookAgent keeps this job narrow. Here is how it compares with two broader KOReader AI plugins.
+
+| Plugin | Main design | Local book tools | Web search | Wider features |
+| --- | --- | --- | --- | --- |
+| BookAgent | A small reading harness with one conversation for each book | Five tools that the model can call | No | Focused on the open book and the current conversation |
+| [KOAssistant](https://github.com/zeeyado/koassistant.koplugin) | A full AI reading suite | Three book tools with automatic and manual modes | Yes | X-Ray, summaries, recap, library tools, artifacts, and more |
+| [Assistant](https://github.com/omer-faruq/assistant.koplugin) | A general AI helper for selected text and book actions | No model-directed local book tool loop | Yes | Translation, dictionary, Term X-Ray, recap, custom prompts, and more |
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/bookagent-01-highlight-ai.png" alt="A passage selected in KOReader with the AI sparkle action visible"><br>
+      <sub>Select a passage</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/bookagent-02-actions.png" alt="BookAgent quick action menu for a selected passage"><br>
+      <sub>Choose an action or ask a question</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/bookagent-05-agent-action.png" alt="BookAgent showing a completed read_around call while waiting for the model response"><br>
+      <sub>See which part of the book the LLM reads</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/bookagent-04-answer.png" alt="BookAgent conversation showing a selected passage and an AI answer"><br>
+      <sub>Keep one conversation for each book</sub>
+    </td>
+  </tr>
+</table>
+
+BookAgent works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not build an index, create embeddings, or run jobs in the background. Each book gets one conversation that you can close and return to later.
 
 ## Install
 
-1. Copy this directory to `koreader/plugins/bookagent.koplugin`.
+1. Copy this directory to `koreader/plugins/bookagent.koplugin` on the device.
 2. Copy `configuration.lua.sample` to `configuration.lua`.
-3. Set `provider`, `base_url`, `model`, and `api_key` in `configuration.lua`.
-4. Restart KOReader.
+3. Add your provider, endpoint, model, and API key to `configuration.lua`.
+4. Restart KOReader and open a book.
 
-Each provider has its own request and stream adapter:
+You should now see **BookAgent** in the reader menu. Select some text and **AI** should also appear in the highlight menu.
 
-- `openai`: OpenAI Chat Completions at `https://api.openai.com/v1/chat/completions`.
-- `deepseek`: DeepSeek Chat Completions at `https://api.deepseek.com/chat/completions`.
-- `openrouter`: OpenRouter Chat Completions at `https://openrouter.ai/api/v1/chat/completions`.
-- `anthropic`: Anthropic Messages at `https://api.anthropic.com/v1/messages`.
+`configuration.lua` contains your API key, so keep it private. Git already ignores it.
 
-OpenAI, DeepSeek, and OpenRouter omit output-token and temperature settings unless you set them. Anthropic requires `max_tokens` in every Messages request; BookAgent uses `8192` when it is unset. Provider-specific body fields can be placed in `parameters`. Custom HTTP headers can be placed in `headers`.
+## Configure the provider
 
-Highlight text and tap `AI`. The main KOReader menu also contains `BookAgent` so a conversation can be reopened without selecting text.
+Most people only need to change four values in `configuration.lua`. Pick a provider and copy its endpoint from the table. Then enter a model name and add the API key.
 
-**Ask AI…** opens one full-page conversation view immediately with the keyboard closed. Tap the message field to open the keyboard. The chat remains active beneath KOReader's modal keyboard, so its conversation pane, scrolling, and close control still respond; tap the conversation pane to dismiss the keyboard. A message field and **Send** button stay below the conversation for the first question and every follow-up. Chat navigation uses KOReader's standard full-page scrolling. User turns appear in gray blocks labeled **YOU**; AI turns are labeled **AI** and render Markdown headings, emphasis, lists, links, quotes, and code blocks. Horizontal rules separate turns.
+| `provider` | Endpoint | API |
+| --- | --- | --- |
+| `openai` | `https://api.openai.com/v1/chat/completions` | OpenAI Chat Completions |
+| `deepseek` | `https://api.deepseek.com/chat/completions` | DeepSeek Chat Completions |
+| `openrouter` | `https://openrouter.ai/api/v1/chat/completions` | OpenRouter Chat Completions |
+| `anthropic` | `https://api.anthropic.com/v1/messages` | Anthropic Messages |
 
-The current AI turn streams into that full-page view in short batches suited to an e-ink screen. When the model calls a book function, an **AGENT ACTION** block shows the actual function name and a safe argument summary, such as `search_book` with its query or `read_around` with its hit ID. Direct answers show only **Waiting for model response…** until visible text arrives. Private model reasoning is never displayed, and BookAgent does not invent actions. **Stop** cancels the active network subprocess.
+Here is a small OpenAI configuration.
 
-On Zen UI, enable its **AI assistant** highlight item. BookAgent registers in that recognized slot so the AI icon is not removed by Zen UI's custom highlight menu.
+```lua
+return {
+    provider = "openai",
+    base_url = "https://api.openai.com/v1/chat/completions",
+    model = "gpt-4.1-mini",
+    api_key = "YOUR_API_KEY",
+    stream = true,
+    verify_ssl = true,
+}
+```
 
-Conversation files are stored under KOReader's settings directory at `bookagent/conversations/<book-id>.lua`. The preferred book ID is KOReader's stored partial document checksum. Raw tool excerpts are sent only for the active request and are not persisted in the conversation.
+The sample configuration includes the less common settings, such as timeouts, extra request fields, and HTTP headers. BookAgent leaves the output token limit and temperature unset for OpenAI, DeepSeek, and OpenRouter unless you choose values yourself. Anthropic requires `max_tokens`, so BookAgent uses `8192` when you leave it out.
 
-`list_links` defaults to the current page. It can also inspect a page, XPointer, or search hit. Internal results receive temporary link IDs that `read_around` can follow. External URLs are reported but never opened, and rolling-document inspection restores the reader's original XPointer.
+## Read with BookAgent
 
-## Host checks
+Select a passage and tap **AI**. Under Zen UI, this is the sparkle icon. The menu gives you a few useful shortcuts. **Explain** deals with the passage as a whole, while **Explain terms** focuses on its vocabulary. Use **Context / history** for the setting or ideas behind a passage. Use **People / characters** when you need to know who someone is.
 
-Run:
+Choose **Ask AI…** when you want to write the question yourself. The conversation opens with the keyboard closed. Tap **Message BookAgent…** to start typing. The message field stays above the keyboard, and a tap in the conversation closes the keyboard again.
+
+The four shortcuts send their questions immediately. They do not create separate chats. Open **BookAgent** from the reader menu whenever you want to continue the conversation for the current book.
+
+## See what the model reads
+
+After you send a question, the provider can start writing an answer or ask BookAgent to read something. Provider code cannot call KOReader directly. It can only ask for one of the five functions below.
+
+BookAgent checks the request and runs the function against the open document. It then returns a limited amount of text to the provider. The provider can ask for another function or finish the answer.
+
+```text
+model → tool request → BookAgent → open document → limited result → model
+```
+
+| Function | What BookAgent does |
+| --- | --- |
+| `search_book` | Searches the open book for one or more phrases and returns a limited number of matches. |
+| `read_around` | Reads a short section around a page, location, search match, or internal link. |
+| `list_links` | Lists links on the current page or near another location. |
+| `toc` | Reads the table of contents. |
+| `current_position` | Reports your current reading position. |
+
+A request often goes from `search_book` to `read_around` and then to the answer. The model may stop sooner or make another call, but BookAgent limits how much it can read in one request.
+
+The **AGENT ACTION** block is a record of calls that BookAgent actually ran. You see the function name and the useful argument for that call. A search shows its query. A read shows the page, match, link, or location. Private reasoning from the provider stays hidden.
+
+`list_links` starts on the current page unless the model gives it another location. Internal links get temporary IDs so `read_around` can follow them. External URLs are shown but never opened. When BookAgent moves through a reflowable document to inspect another location, it returns you to the place where you were reading.
+
+## Conversations and privacy
+
+Your turns appear in gray blocks marked **YOU**, with model replies under **AI**. Replies can contain headings, lists, links, quotes, code blocks, and tables. Text arrives in short batches instead of making the Kindle wait for the complete answer.
+
+BookAgent saves the conversation in KOReader's settings directory.
+
+```text
+bookagent/conversations/<book-id>.lua
+```
+
+KOReader's stored partial checksum is normally used as the book ID. BookAgent saves your questions and the model's replies. Text fetched by a book function is kept only for the active request and is not copied into the conversation file.
+
+The provider may receive the passage you selected, your question, earlier conversation turns, and text returned by a book function. BookAgent never uploads the full book on its own.
+
+## Zen UI
+
+Turn on **AI assistant** in Zen UI's highlight settings. BookAgent uses this slot so the sparkle icon stays in Zen UI's custom highlight menu.
+
+## Development
+
+Run the checks from the plugin directory.
 
 ```sh
 ./scripts/test.sh
 ```
 
-These checks cover the agent loop, multiple calls in one turn, budgets, malformed responses, failed tools, OpenAI/DeepSeek/OpenRouter/Anthropic request shapes, provider-specific headers, streamed SSE text, hidden provider state, streamed tool calls, output-limit detection, transport framing, hyperlink normalization and position restoration, quick actions, conversation HTML structure, Markdown viewer wiring, and per-book persistence. They do not prove final display geometry, live network behavior, or document extraction on a physical Kindle.
+The script runs the same tests under LuaJIT and Lua, then parses every Lua file. The tests cover the agent loop, tool limits, provider formats, streaming, storage, links, and conversation rendering. They do not test the final screen layout or a live network request on a Kindle.
+
+## License and notice
+
+BookAgent is licensed under the [GNU General Public License version 3](LICENSE). See [NOTICE](NOTICE) for copyright and related project credits.

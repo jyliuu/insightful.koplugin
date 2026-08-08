@@ -1,0 +1,19 @@
+BookAgent for KOReader
+Copyright (C) 2026 Jinyang Liu
+
+BookAgent is licensed under the GNU General Public License version 3.
+See LICENSE for the full terms.
+
+Related work
+
+BookAgent's design was informed by these KOReader AI plugins:
+
+* KOAssistant by zeeyado and its contributors
+  https://github.com/zeeyado/koassistant.koplugin
+
+* Assistant by omer-faruq and its contributors
+  https://github.com/omer-faruq/assistant.koplugin
+
+Both related projects are licensed under the GNU General Public License
+version 3. Their authors and contributors retain copyright in their work.
+They are not bundled with BookAgent.
