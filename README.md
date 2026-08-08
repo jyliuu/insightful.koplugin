@@ -46,8 +46,6 @@ Insightful works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not b
 
 You should now see **Insightful** in the reader menu. Select some text and **AI** should also appear in the highlight menu.
 
-If you are upgrading from BookAgent, rename the old `bookagent.koplugin` directory to `insightful.koplugin`. Insightful will read conversations from the old settings path and save later changes under the new name.
-
 `configuration.lua` contains your API key, so keep it private. Git already ignores it.
 
 ## Configure the provider

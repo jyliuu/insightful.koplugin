@@ -48,7 +48,6 @@ function Storage:new(options)
     options = options or {}
     local instance = setmetatable({}, self)
     instance.root = assert(options.root, "storage root is required")
-    instance.legacy_root = options.legacy_root
     instance.settings_factory = options.settings_factory
     instance.make_path = options.make_path
     instance.partial_md5 = options.partial_md5
@@ -62,7 +61,6 @@ function Storage.forUI(ui)
     local root = DataStorage:getSettingsDir() .. "/insightful/conversations"
     return Storage:new{
         root = root,
-        legacy_root = DataStorage:getSettingsDir() .. "/bookagent/conversations",
         settings_factory = function(path) return LuaSettings:open(path) end,
         make_path = util.makePath,
         partial_md5 = util.partialMD5,
@@ -108,12 +106,6 @@ function Storage:conversationPath(book_id)
     return self.root .. "/" .. id .. ".lua"
 end
 
-function Storage:legacyConversationPath(book_id)
-    if not self.legacy_root then return nil end
-    local id = assert(cleanId(book_id), "valid book id is required")
-    return self.legacy_root .. "/" .. id .. ".lua"
-end
-
 function Storage:newConversation(book)
     return {
         version = VERSION,
@@ -152,14 +144,6 @@ end
 function Storage:load(book)
     local path = self:conversationPath(book.id)
     local data, err = self:_read(path, true)
-    if not data then
-        local legacy_path = self:legacyConversationPath(book.id)
-        if legacy_path then
-            local legacy_data, legacy_err = self:_read(legacy_path, false)
-            data = legacy_data
-            err = err or legacy_err
-        end
-    end
     if not data then return self:newConversation(book), err end
     data.book = copyTable(book)
     data.summary = data.summary or nil
