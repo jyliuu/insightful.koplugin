@@ -42,7 +42,8 @@ jobs:
         run: |
           archive="$(./scripts/package.sh)"
           checksum="$archive.sha256"
-          sha256sum "$archive" > "$checksum"
+          archive_sha="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          printf '%s  %s\n' "$archive_sha" "${archive##*/}" > "$checksum"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
 
