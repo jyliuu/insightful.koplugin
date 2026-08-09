@@ -108,7 +108,7 @@ model → tool request → Insightful → open document → limited result → m
 | `toc` | Reads the table of contents. |
 | `current_position` | Reports your current reading position. |
 
-A request often goes from `search_book` to `read_around` and then to the answer. Each tool call returns a limited amount of book text. Insightful does not cap the number of tool calls, so the model can continue until it answers or you cancel the request.
+A request often goes from `search_book` to `read_around` and then to the answer. Each tool call returns a limited amount of book text.
 
 The **AGENT ACTION** block is a record of calls that Insightful actually ran. You see the function name and the useful argument for that call. A search shows its query. A read shows the page, match, link, or location. Private reasoning from the provider stays hidden.
 
