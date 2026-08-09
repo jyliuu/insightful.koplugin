@@ -264,6 +264,10 @@ function ConversationViewer:init()
         with_bottom_line = true,
         title = self.title or _("Insightful conversation"),
         title_multilines = true,
+        left_icon = "appbar.menu",
+        left_icon_tap_callback = function()
+            if self.on_chats then self.on_chats() end
+        end,
         close_callback = function() self:onClose() end,
         show_parent = self,
     }

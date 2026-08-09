@@ -1,4 +1,6 @@
 local ButtonDialog = require("ui/widget/buttondialog")
+local Dispatcher = require("dispatcher")
+local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
@@ -22,6 +24,7 @@ local Agent = localRequire("agent")
 local AnswerViewer = localRequire("answer_viewer")
 local BookTools = localRequire("book_tools")
 local Chat = localRequire("chat")
+local ChatList = localRequire("chat_list")
 local ProviderRegistry = localRequire("provider_registry"):new{
     compatible = localRequire("provider_openai_compatible"),
     anthropic = localRequire("provider_anthropic"),
@@ -50,6 +53,7 @@ end
 function Insightful:init()
     self.configuration = loadConfiguration()
     self.storage = Storage.forUI(self.ui)
+    self:onDispatcherRegisterActions()
     if self.ui.menu then self.ui.menu:registerToMainMenu(self) end
     if self.ui.highlight then
         -- Zen UI exposes this recognized slot when show_ai_assistant is enabled.
@@ -64,6 +68,15 @@ function Insightful:init()
             }
         end)
     end
+end
+
+function Insightful:onDispatcherRegisterActions()
+    Dispatcher:registerAction("insightful_show_chats", {
+        category = "none",
+        event = "ShowInsightfulChats",
+        title = _("Insightful: show chats"),
+        reader = true,
+    })
 end
 
 function Insightful:captureSelection(reader_highlight)
@@ -93,11 +106,16 @@ function Insightful:captureSelection(reader_highlight)
     }
 end
 
-function Insightful:openChat(selection, quick_action, focus_input)
+function Insightful:_showStorageError(message, err)
+    logger.warn("Insightful: storage error:", err)
+    UIManager:show(InfoMessage:new{
+        text = message,
+        icon = "notice-warning",
+    })
+end
+
+function Insightful:_openConversation(conversation, selection, quick_action, focus_input)
     if self.active_chat then self.active_chat:close() end
-    local book = self.storage:getBook(self.ui)
-    local conversation, load_err = self.storage:load(book)
-    if load_err then logger.warn("Insightful: conversation load warning:", load_err) end
     local chat = Chat:new{
         plugin = self,
         agent = Agent,
@@ -112,18 +130,67 @@ function Insightful:openChat(selection, quick_action, focus_input)
         context = {
             ui = self.ui,
             document = self.ui.document,
-            book_id = book.id,
+            book_id = conversation.book.id,
         },
     }
     self.active_chat = chat
     chat:show(focus_input, quick_action)
 end
 
+function Insightful:openChat(selection, quick_action, focus_input, chat_id)
+    local book = self.storage:getBook(self.ui)
+    local conversation, load_err = self.storage:load(book, chat_id)
+    if not conversation then
+        self:_showStorageError(_("The chat could not be opened."), load_err)
+        return
+    end
+    if load_err then logger.warn("Insightful: conversation load warning:", load_err) end
+    self:_openConversation(conversation, selection, quick_action, focus_input)
+end
+
+function Insightful:startNewChat(selection, quick_action, focus_input)
+    local book = self.storage:getBook(self.ui)
+    local conversation, create_err = self.storage:create(book)
+    if not conversation then
+        self:_showStorageError(_("A new chat could not be started."), create_err)
+        return
+    end
+    self:_openConversation(conversation, selection, quick_action, focus_input)
+end
+
+function Insightful:openFromHighlight(selection, quick_action, focus_input)
+    local book = self.storage:getBook(self.ui)
+    local enabled, setting_err = self.storage:getNewChatOnSend(book)
+    if setting_err then
+        logger.warn("Insightful: highlighted-action chat setting could not be read:", setting_err)
+    end
+    if enabled then
+        return self:startNewChat(selection, quick_action, focus_input)
+    end
+    return self:openChat(selection, quick_action, focus_input)
+end
+
+function Insightful:showChatList()
+    if self.active_chat then self.active_chat:close() end
+    local book = self.storage:getBook(self.ui)
+    return ChatList.show{
+        storage = self.storage,
+        book = book,
+        on_new = function() self:startNewChat(nil, nil, true) end,
+        on_open = function(chat_id) self:openChat(nil, nil, true, chat_id) end,
+    }
+end
+
+function Insightful:onShowInsightfulChats()
+    self:showChatList()
+    return true
+end
+
 function Insightful:showHighlightActions(selection)
     local action_dialog
     local function choose(action, focus_input)
         UIManager:close(action_dialog)
-        UIManager:nextTick(function() self:openChat(selection, action, focus_input) end)
+        UIManager:nextTick(function() self:openFromHighlight(selection, action, focus_input) end)
     end
     action_dialog = ButtonDialog:new{
         title = _("AI"),
@@ -145,9 +212,50 @@ function Insightful:showHighlightActions(selection)
 end
 
 function Insightful:addToMainMenu(menu_items)
+    local book = self.storage:getBook(self.ui)
     menu_items.insightful = {
         text = _("Insightful"),
-        callback = function() self:openChat(nil, nil, true) end,
+        sorting_hint = "tools",
+        sub_item_table = {
+            {
+                text = _("Continue current chat"),
+                callback = function() self:openChat(nil, nil, true) end,
+            },
+            {
+                text = _("Chats"),
+                callback = function() self:showChatList() end,
+            },
+            {
+                text = _("Start new chat"),
+                callback = function() self:startNewChat(nil, nil, true) end,
+                separator = true,
+            },
+            {
+                text = _("New chat for highlighted actions"),
+                checked_func = function()
+                    return self.storage:getNewChatOnSend(book)
+                end,
+                callback = function(touchmenu_instance)
+                    local enabled = self.storage:getNewChatOnSend(book)
+                    local ok, save_err = self.storage:setNewChatOnSend(book, not enabled)
+                    if not ok then
+                        self:_showStorageError(_("The chat setting could not be saved."), save_err)
+                    end
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
+                end,
+                keep_menu_open = true,
+                help_text = _("When this is on, each button chosen for a highlighted passage starts a separate chat. Later messages continue that chat."),
+            },
+            {
+                text = _("Gesture shortcut"),
+                callback = function()
+                    UIManager:show(InfoMessage:new{
+                        text = _("Open Taps and gestures, then Gesture manager. Assign Insightful: show chats to a corner, swipe, or multiswipe gesture."),
+                    })
+                end,
+                help_text = _("The gesture opens the chat list without selecting text."),
+            },
+        },
     }
 end
 

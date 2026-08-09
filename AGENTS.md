@@ -4,12 +4,12 @@ This file applies to this repository.
 
 ## Required product shape
 
-- Keep one persistent conversation per book.
+- Keep chats scoped to the open book, and keep only one chat active at a time.
 - Keep the path `provider -> neutral tool call -> BookTools.execute -> KOReader document API` explicit.
 - Keep provider code independent of KOReader document methods.
 - Keep book-tool code independent of provider wire formats.
 - Implement only `search_book`, `read_around`, `list_links`, `toc`, and `current_position`.
-- Do not add embeddings, a vector database, multiple agents, web search, background indexing, or multiple chats per book.
+- Do not add embeddings, a vector database, multiple agents, web search, background indexing, or chats shared across books.
 
 ## Editing and checks
 

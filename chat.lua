@@ -101,8 +101,6 @@ function Chat:_errorText(err)
         return _("The AI service returned an invalid response.")
     elseif err:find("AI service returned", 1, true) then
         return _("The AI service returned an invalid response.")
-    elseif err:find("lookup limit", 1, true) then
-        return _("Book lookup limit reached.")
     elseif err:find("output limit", 1, true) then
         return _("The AI service reached its output limit before finishing.")
     elseif err:find("context window", 1, true) then
@@ -144,6 +142,13 @@ function Chat:_showConversation()
             self:send(question, self.pending_selection)
         end,
         on_stop = function() if self.busy then self:_cancelStream() end end,
+        on_chats = function()
+            local plugin = self.plugin
+            self:close()
+            UIManager:nextTick(function()
+                if plugin then plugin:showChatList() end
+            end)
+        end,
         close_callback = function() self:_onViewerClosed(viewer) end,
     }
     self.viewer = viewer
@@ -234,7 +239,6 @@ function Chat:_send(question, selection, display_content)
         self:_updateViewer()
         return
     end
-
     self.busy = true
     self.pending_selection = nil
     local user_message = self.agent.makeUserMessage(question, selection)
