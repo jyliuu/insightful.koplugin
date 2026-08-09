@@ -1,8 +1,5 @@
 local Agent = {}
 
-Agent.MAX_TOOL_TURNS = 4
-Agent.MAX_TOOL_CALLS = 8
-
 Agent.quick_actions = {
     explain = "Explain the selected passage clearly and concisely. Focus on what is useful for understanding the passage while I am reading.",
     explain_terms = "Explain the important terms, expressions, references, concepts, or terminology in the selected passage that may not be obvious. Keep the explanation concise and specific to this context.",
@@ -163,8 +160,6 @@ function Agent.run(conversation, options)
     options = options or {}
     local provider = assert(options.provider, "provider is required")
     local book_tools = assert(options.book_tools, "book_tools is required")
-    local max_tool_turns = options.max_tool_turns or Agent.MAX_TOOL_TURNS
-    local max_tool_calls = options.max_tool_calls or Agent.MAX_TOOL_CALLS
     local messages = Agent.buildMessages(conversation)
     local tool_turns, tool_calls = 0, 0
     local trace = {}
@@ -196,9 +191,6 @@ function Agent.run(conversation, options)
             return nil, "The AI service returned neither text nor tool calls."
         end
 
-        if tool_turns >= max_tool_turns or tool_calls + #calls > max_tool_calls then
-            return nil, "Book lookup limit reached."
-        end
         if type(options.on_tools) == "function" then
             pcall(options.on_tools, calls)
         end

@@ -101,8 +101,6 @@ function Chat:_errorText(err)
         return _("The AI service returned an invalid response.")
     elseif err:find("AI service returned", 1, true) then
         return _("The AI service returned an invalid response.")
-    elseif err:find("lookup limit", 1, true) then
-        return _("Book lookup limit reached.")
     elseif err:find("output limit", 1, true) then
         return _("The AI service reached its output limit before finishing.")
     elseif err:find("context window", 1, true) then

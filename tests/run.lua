@@ -177,24 +177,26 @@ test("multiple tool calls execute before the next provider turn", function()
     same(#names, 2, "executed calls")
 end)
 
-test("tool turn budget stops a repeated lookup loop", function()
+test("book tool use continues beyond the former lookup limits", function()
     local provider = {
         count = 0,
         chat = function(self)
             self.count = self.count + 1
-            return { tool_calls = {{ id = tostring(self.count), name = "toc", arguments = {} }} }
+            if self.count > 5 then return { text = "Finished after enough book research." } end
+            return { tool_calls = {
+                { id = tostring(self.count) .. "-toc", name = "toc", arguments = {} },
+                { id = tostring(self.count) .. "-position", name = "current_position", arguments = {} },
+            } }
         end,
     }
     local count = 0
     local tools = { execute = function() count = count + 1; return { ok = true } end }
-    local answer, err = Agent.run(conversation(), {
-        provider = provider,
-        book_tools = tools,
-        max_tool_turns = 2,
-    })
-    same(answer, nil, "answer should be absent")
-    contains(err, "limit", "budget error")
-    same(count, 2, "executed calls before limit")
+    local answer, err, provenance = Agent.run(conversation(), { provider = provider, book_tools = tools })
+    same(err, nil, "agent error")
+    same(answer, "Finished after enough book research.", "answer after extended research")
+    same(provenance.tool_turns, 5, "tool rounds are not capped at four")
+    same(provenance.tool_calls, 10, "tool calls are not capped at eight")
+    same(count, 10, "all book tool calls executed")
 end)
 
 test("malformed provider response is controlled", function()
