@@ -8,7 +8,7 @@ Insightful keeps this job narrow. Here is how it compares with two broader KORea
 
 | Plugin | Main design | Local book tools | Web search | Wider features |
 | --- | --- | --- | --- | --- |
-| Insightful | A small reading harness with one conversation for each book | Five tools that the model can call | No | Focused on the open book and the current conversation |
+| Insightful | A small reading harness with saved chats for each book | Five tools that the model can call | No | Focused on the open book and the selected chat |
 | [KOAssistant](https://github.com/zeeyado/koassistant.koplugin) | A full AI reading suite | Three book tools with automatic and manual modes | Yes | X-Ray, summaries, recap, library tools, artifacts, and more |
 | [Assistant](https://github.com/omer-faruq/assistant.koplugin) | A general AI helper for selected text and book actions | No model-directed local book tool loop | Yes | Translation, dictionary, Term X-Ray, recap, custom prompts, and more |
 
@@ -30,12 +30,12 @@ Insightful keeps this job narrow. Here is how it compares with two broader KORea
     </td>
     <td align="center" width="50%">
       <img src="docs/images/insightful-04-answer.png" alt="Insightful conversation showing a selected passage and an AI answer"><br>
-      <sub>Keep one conversation for each book</sub>
+      <sub>Read the saved conversation</sub>
     </td>
   </tr>
 </table>
 
-Insightful works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not build an index, create embeddings, or run jobs in the background. Each book gets one conversation that you can close and return to later.
+Insightful works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not build an index, create embeddings, or run jobs in the background. Each book can have several saved chats that you can close and open later.
 
 ## Install
 
@@ -44,7 +44,7 @@ Insightful works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not b
 3. Add your provider, endpoint, model, and API key to `configuration.lua`.
 4. Restart KOReader and open a book.
 
-You should now see **Insightful** in the reader menu. Select some text and **AI** should also appear in the highlight menu.
+You should now see **Insightful** in the reader menu. Its submenu lets you continue the current chat, open the chat list, or start a new chat. Select some text and **AI** should also appear in the highlight menu.
 
 `configuration.lua` contains your API key, so keep it private. Git already ignores it.
 
@@ -80,7 +80,15 @@ Select a passage and tap **AI**. Under Zen UI, this is the sparkle icon. The men
 
 Choose **Ask AI…** when you want to write the question yourself. The conversation opens with the keyboard closed. Tap **Message Insightful…** to start typing. The message field stays above the keyboard, and a tap in the conversation closes the keyboard again.
 
-The four shortcuts send their questions immediately. They do not create separate chats. Open **Insightful** from the reader menu whenever you want to continue the conversation for the current book.
+The four shortcuts send their questions immediately. They use the current chat unless **New chat for highlighted actions** is on.
+
+Open **Insightful** from the reader menu when you want to manage chats for the current book. Choose **Chats** to see the saved chats, or tap the menu icon in an open chat. Tap a chat to open it. Hold a chat and confirm the prompt to delete it. Choose **Start new chat** when you want a blank conversation.
+
+Turn on **New chat for highlighted actions** when each button chosen from the highlighted passage menu should start a separate chat. This includes **Ask AI…**. Once the chat is open, later messages continue that chat. The setting applies only to the current book.
+
+## Open the chat list with a gesture
+
+Insightful adds an action named **Insightful: show chats** to KOReader's gesture manager. Open **Taps and gestures**, then **Gesture manager**, and assign the action to a corner hold, a swipe, or a multiswipe. The assigned gesture opens the chat list for the current book without selecting text.
 
 ## See what the model reads
 
@@ -110,13 +118,13 @@ The **AGENT ACTION** block is a record of calls that Insightful actually ran. Yo
 
 Your turns appear in gray blocks marked **YOU**, with model replies under **AI**. Replies can contain headings, lists, links, quotes, code blocks, and tables. Text arrives in short batches instead of making the Kindle wait for the complete answer.
 
-Insightful saves the conversation in KOReader's settings directory.
+Insightful saves all chats for a book in one file in KOReader's settings directory.
 
 ```text
 insightful/conversations/<book-id>.lua
 ```
 
-KOReader's stored partial checksum is normally used as the book ID. Insightful saves your questions and the model's replies. Text fetched by a book function is kept only for the active request and is not copied into the conversation file.
+KOReader's stored partial checksum is normally used as the book ID. Insightful saves each chat's questions and model replies, along with the current chat and the setting for starting a new chat from highlighted actions. The first test build with multiple chats moves an existing conversation into the first chat for its book. Text fetched by a book function is kept only for the active request and is not copied into the conversation file.
 
 The provider may receive the passage you selected, your question, earlier conversation turns, and text returned by a book function. Insightful never uploads the full book on its own.
 
