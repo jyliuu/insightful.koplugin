@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,10 +17,14 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Check out the tagged commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Lua
         run: |
@@ -22,7 +32,7 @@ jobs:
           sudo apt-get install --yes lua5.1 luajit zip unzip
 
       - name: Check the release version
-        run: ./scripts/check-version.sh "${GITHUB_REF_NAME}"
+        run: ./scripts/check-version.sh "$RELEASE_TAG"
 
       - name: Run tests and Lua syntax checks
         run: ./scripts/test.sh
@@ -43,13 +53,13 @@ jobs:
           CHECKSUM: ${{ steps.package.outputs.checksum }}
         run: |
           set -- \
-            "$GITHUB_REF_NAME" \
+            "$RELEASE_TAG" \
             "$ARCHIVE" \
             "$CHECKSUM" \
             --verify-tag \
             --generate-notes \
-            --title "Insightful $GITHUB_REF_NAME"
-          case "$GITHUB_REF_NAME" in
+            --title "Insightful $RELEASE_TAG"
+          case "$RELEASE_TAG" in
             *-*) set -- "$@" --prerelease ;;
           esac
           gh release create "$@"
