@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+
+      - name: Install Lua
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lua5.1 luajit zip unzip
+
+      - name: Check the release version
+        run: ./scripts/check-version.sh "${GITHUB_REF_NAME}"
+
+      - name: Run tests and Lua syntax checks
+        run: ./scripts/test.sh
+
+      - name: Build the ZenPM compatible archive
+        id: package
+        run: |
+          archive="$(./scripts/package.sh)"
+          checksum="$archive.sha256"
+          sha256sum "$archive" > "$checksum"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: |
+          set -- \
+            "$GITHUB_REF_NAME" \
+            "$ARCHIVE" \
+            "$CHECKSUM" \
+            --verify-tag \
+            --generate-notes \
+            --title "Insightful $GITHUB_REF_NAME"
+          case "$GITHUB_REF_NAME" in
+            *-*) set -- "$@" --prerelease ;;
+          esac
+          gh release create "$@"

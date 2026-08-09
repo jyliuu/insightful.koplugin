@@ -134,6 +134,8 @@ Run the checks from the plugin directory.
 
 The script runs the same tests under LuaJIT and Lua, then parses every Lua file. The tests cover the agent loop, tool limits, provider formats, streaming, storage, links, and conversation rendering. They do not test the final screen layout or a live network request on a Kindle.
 
+Insightful uses Semantic Versioning and Conventional Commit prefixes. Use `./scripts/bump-version.sh patch`, `minor`, or `major` to update `VERSION` and `_meta.lua` together. A `vX.Y.Z` tag runs the checks and creates a ZenPM compatible GitHub release ZIP. See [RELEASING.md](RELEASING.md) for the complete release steps.
+
 ## License and notice
 
 Insightful is licensed under the [GNU General Public License version 3](LICENSE). See [NOTICE](NOTICE) for copyright and related project credits.
