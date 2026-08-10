@@ -135,13 +135,14 @@ function Chat:_errorText(err)
     return _("Couldn't reach the AI service.")
 end
 
-function Chat:_updateViewer()
+function Chat:_updateViewer(refresh_text_only)
     if self.closed or not self.viewer then return end
     self.viewer:update(
         self.conversation.messages,
         self.stream_text,
         self.stream_status,
-        self.busy
+        self.busy,
+        refresh_text_only == true
     )
 end
 
@@ -188,7 +189,7 @@ function Chat:_flushStream()
     self.stream_text = self.stream_text .. table.concat(self.stream_pending)
     self.stream_pending = {}
     self.stream_status = nil
-    self:_updateViewer()
+    self:_updateViewer(true)
 end
 
 function Chat:_setStreamStatus(text)
