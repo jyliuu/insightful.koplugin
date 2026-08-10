@@ -56,10 +56,11 @@ next_meta_version=$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^
 
 chmod 644 "$version_tmp" "$meta_tmp"
 
+"$plugin_root/scripts/update-changelog.sh" "$next"
 mv "$version_tmp" "$plugin_root/VERSION"
 mv "$meta_tmp" "$plugin_root/_meta.lua"
 trap - EXIT HUP INT TERM
 
 "$plugin_root/scripts/check-version.sh" "$next" >/dev/null
 printf '%s\n' "updated Insightful from $current to $next"
-printf '%s\n' "commit VERSION and _meta.lua, then tag that commit as v$next"
+printf '%s\n' "commit VERSION, _meta.lua, and CHANGELOG.md, then tag that commit as v$next"

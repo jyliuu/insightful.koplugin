@@ -6,7 +6,7 @@ Insightful uses Semantic Versioning. The release number has three parts in the f
 - Use a minor release for a compatible feature, such as `0.1.1` to `0.2.0`.
 - Use a major release for a change that breaks existing behavior or settings, such as `0.2.0` to `1.0.0`.
 
-The `VERSION` file is the release version. KOReader also needs a literal version in `_meta.lua`, so the bump script updates both files and the checks reject any mismatch.
+The `VERSION` file is the release version. KOReader also needs a literal version in `_meta.lua`, so the bump script updates both files and the checks reject any mismatch. The same script adds a section to `CHANGELOG.md` from the Conventional Commit subjects since the previous release. Edit those generated entries before the release commit when they need clearer user facing text.
 
 ## Commit messages
 
@@ -23,7 +23,7 @@ Keep the version bump in its own commit. For example, a patch release can use th
 ./scripts/bump-version.sh patch
 ./scripts/test.sh
 ./scripts/package.sh
-git add VERSION _meta.lua
+git add VERSION _meta.lua CHANGELOG.md
 git commit -m "chore(release): v0.1.1"
 git tag -a v0.1.1 -m "Insightful v0.1.1"
 git push origin main v0.1.1
@@ -39,9 +39,9 @@ Do not move a published tag. Make another patch release when a release needs a c
 
 ## Release checks
 
-A tag named `vX.Y.Z` starts the release workflow. The workflow checks that the tag, `VERSION`, and `_meta.lua` agree. It then runs the host tests and parses every Lua file.
+A tag named `vX.Y.Z` starts the release workflow. The workflow checks that the tag, `VERSION`, `_meta.lua`, and the changelog agree. It uses that version's changelog section for the GitHub release notes. It then runs the host tests and parses every Lua file.
 
-The workflow creates `insightful.koplugin-vX.Y.Z.zip` and a SHA-256 checksum. The ZIP contains one top level directory named `insightful.koplugin`, and it never contains the private `configuration.lua` file.
+The workflow creates `insightful.koplugin-vX.Y.Z.zip` and a SHA-256 checksum. The ZIP contains one top level directory named `insightful.koplugin`, including `CHANGELOG.md`, and it never contains the private `configuration.lua` file.
 
 GitHub marks tags with a prerelease suffix as prereleases. Stable tags create stable releases.
 

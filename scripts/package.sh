@@ -28,7 +28,7 @@ for source in "$plugin_root"/providers/*.lua; do
     cp "$source" "$package_root/providers/${source##*/}"
 done
 
-for name in VERSION LICENSE NOTICE configuration.lua.sample; do
+for name in VERSION CHANGELOG.md LICENSE NOTICE configuration.lua.sample; do
     [ -f "$plugin_root/$name" ] || {
         printf '%s\n' "package failed: $name is missing" >&2
         exit 1
@@ -53,6 +53,10 @@ unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/main\.lua$' || {
 }
 unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/providers/registry\.lua$' || {
     printf '%s\n' "package failed: providers/registry.lua is missing from the archive" >&2
+    exit 1
+}
+unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/CHANGELOG\.md$' || {
+    printf '%s\n' "package failed: CHANGELOG.md is missing from the archive" >&2
     exit 1
 }
 if unzip -Z1 "$archive_path" | grep -Ev '^insightful\.koplugin/([^/]+|providers/[^/]+\.lua)$' >/dev/null; then

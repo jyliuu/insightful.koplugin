@@ -158,7 +158,7 @@ Run the checks from the plugin directory.
 
 The script runs the same tests under LuaJIT and Lua, then parses every Lua file. The tests cover the agent loop, tool limits, provider formats, streaming, storage, links, and conversation rendering. They do not test the final screen layout or a live network request on a Kindle.
 
-Insightful uses Semantic Versioning and Conventional Commit prefixes. Use `./scripts/bump-version.sh patch`, `minor`, or `major` to update `VERSION` and `_meta.lua` together. A `vX.Y.Z` tag runs the checks and creates a ZenPM compatible GitHub release ZIP. See [RELEASING.md](RELEASING.md) for the complete release steps.
+Insightful uses Semantic Versioning and Conventional Commit prefixes. Use `./scripts/bump-version.sh patch`, `minor`, or `major` to update `VERSION`, `_meta.lua`, and `CHANGELOG.md` together. A `vX.Y.Z` tag runs the checks, uses that version's changelog section as the release notes, and creates a ZenPM compatible GitHub release ZIP. See [RELEASING.md](RELEASING.md) for the complete release steps.
 
 ## License and notice
 

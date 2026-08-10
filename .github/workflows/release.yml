@@ -25,6 +25,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - name: Install Lua
         run: |
@@ -33,6 +34,16 @@ jobs:
 
       - name: Check the release version
         run: ./scripts/check-version.sh "$RELEASE_TAG"
+
+      - name: Update the changelog and prepare release notes
+        run: |
+          ./scripts/update-changelog.sh "$RELEASE_TAG"
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git diff -- CHANGELOG.md
+            echo "::error::Commit the changelog entry before creating the release tag."
+            exit 1
+          fi
+          ./scripts/changelog-section.sh "$RELEASE_TAG" > release-notes.md
 
       - name: Run tests and Lua syntax checks
         run: ./scripts/test.sh
@@ -58,7 +69,7 @@ jobs:
             "$ARCHIVE" \
             "$CHECKSUM" \
             --verify-tag \
-            --generate-notes \
+            --notes-file release-notes.md \
             --title "Insightful $RELEASE_TAG"
           case "$RELEASE_TAG" in
             *-*) set -- "$@" --prerelease ;;
