@@ -4,13 +4,13 @@ local root = script:match("^(.*)/tests/run%.lua$") or "."
 local Agent = dofile(root .. "/agent.lua")
 local BookTools = dofile(root .. "/book_tools.lua")
 local ConversationRenderer = dofile(root .. "/conversation_renderer.lua")
-local ProviderRegistry = dofile(root .. "/provider_registry.lua"):new{
-    compatible = dofile(root .. "/provider_openai_compatible.lua"),
-    anthropic = dofile(root .. "/provider_anthropic.lua"),
+local ProviderRegistry = dofile(root .. "/providers/registry.lua"):new{
+    compatible = dofile(root .. "/providers/openai_compatible.lua"),
+    anthropic = dofile(root .. "/providers/anthropic.lua"),
     variants = {
-        openai = dofile(root .. "/provider_openai.lua"),
-        deepseek = dofile(root .. "/provider_deepseek.lua"),
-        openrouter = dofile(root .. "/provider_openrouter.lua"),
+        openai = dofile(root .. "/providers/openai.lua"),
+        deepseek = dofile(root .. "/providers/deepseek.lua"),
+        openrouter = dofile(root .. "/providers/openrouter.lua"),
     },
 }
 local Storage = dofile(root .. "/storage.lua")
@@ -1060,10 +1060,10 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     main_file:close()
     contains(main_source, 'localRequire("streaming")', "stream transport loaded")
     contains(main_source, 'localRequire("answer_viewer")', "answer viewer loaded")
-    contains(main_source, 'localRequire("provider_openai")', "OpenAI provider loaded")
-    contains(main_source, 'localRequire("provider_deepseek")', "DeepSeek provider loaded")
-    contains(main_source, 'localRequire("provider_openrouter")', "OpenRouter provider loaded")
-    contains(main_source, 'localRequire("provider_anthropic")', "Anthropic provider loaded")
+    contains(main_source, 'localRequire("providers/openai")', "OpenAI provider loaded")
+    contains(main_source, 'localRequire("providers/deepseek")', "DeepSeek provider loaded")
+    contains(main_source, 'localRequire("providers/openrouter")', "OpenRouter provider loaded")
+    contains(main_source, 'localRequire("providers/anthropic")', "Anthropic provider loaded")
     contains(main_source, 'localRequire("chat_list")', "chat list loaded")
     contains(main_source, 'localRequire("stats")', "statistics storage loaded")
     contains(main_source, 'Dispatcher:registerAction("insightful_show_chats"', "chat list gesture action")

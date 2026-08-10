@@ -25,13 +25,13 @@ local AnswerViewer = localRequire("answer_viewer")
 local BookTools = localRequire("book_tools")
 local Chat = localRequire("chat")
 local ChatList = localRequire("chat_list")
-local ProviderRegistry = localRequire("provider_registry"):new{
-    compatible = localRequire("provider_openai_compatible"),
-    anthropic = localRequire("provider_anthropic"),
+local ProviderRegistry = localRequire("providers/registry"):new{
+    compatible = localRequire("providers/openai_compatible"),
+    anthropic = localRequire("providers/anthropic"),
     variants = {
-        openai = localRequire("provider_openai"),
-        deepseek = localRequire("provider_deepseek"),
-        openrouter = localRequire("provider_openrouter"),
+        openai = localRequire("providers/openai"),
+        deepseek = localRequire("providers/deepseek"),
+        openrouter = localRequire("providers/openrouter"),
     },
 }
 local Storage = localRequire("storage")
