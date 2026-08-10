@@ -51,11 +51,22 @@ local function loadConfiguration()
     return {}
 end
 
+local function moveMenuItemToFront(menu_name, item_name)
+    local ok, order = pcall(require, "ui/elements/reader_menu_order")
+    local items = ok and order and order[menu_name]
+    if type(items) ~= "table" then return end
+    for index = #items, 1, -1 do
+        if items[index] == item_name then table.remove(items, index) end
+    end
+    table.insert(items, 1, item_name)
+end
+
 function Insightful:init()
     self.configuration = loadConfiguration()
     self.storage = Storage.forUI(self.ui)
     self.stats = Stats.forUI()
     self:onDispatcherRegisterActions()
+    moveMenuItemToFront("tools", self.name)
     if self.ui.menu then self.ui.menu:registerToMainMenu(self) end
     if self.ui.highlight then
         -- Zen UI exposes this recognized slot when show_ai_assistant is enabled.

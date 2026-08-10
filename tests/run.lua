@@ -1067,6 +1067,7 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     contains(main_source, 'localRequire("chat_list")', "chat list loaded")
     contains(main_source, 'localRequire("stats")', "statistics storage loaded")
     contains(main_source, 'Dispatcher:registerAction("insightful_show_chats"', "chat list gesture action")
+    contains(main_source, 'moveMenuItemToFront("tools", self.name)', "Insightful menu is first in Tools")
     contains(main_source, 'sorting_hint = "tools"', "Insightful menu is placed in Tools")
     contains(main_source, 'text = _("New chat for highlighted actions")', "highlighted-action new-chat toggle")
     contains(main_source, 'text = _("Statistics")', "statistics menu")
