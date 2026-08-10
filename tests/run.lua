@@ -825,6 +825,151 @@ test("sending inside an existing chat never creates another chat", function()
     same(recorded_usage.total_tokens, 48, "chat records model token use")
 end)
 
+test("closing a chat keeps its answer running and saves the result", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local plugin = {}
+    local saved_active = {}
+    local cancel_count = 0
+    local chat
+    chat = Chat:new{
+        plugin = plugin,
+        agent = {
+            makeUserMessage = function(question)
+                return { role = "user", content = question }
+            end,
+            run = function(_, options)
+                options.stream_control.cancel = function()
+                    cancel_count = cancel_count + 1
+                end
+                same(plugin.running_chat, chat, "plugin owns running chat")
+                chat:_onViewerClosed(chat.viewer)
+                same(plugin.running_chat, chat, "closed chat remains owned while running")
+                options.on_tool_start({ name = "search_book", arguments = { query = "history" } })
+                same(chat.stream_status.state, "calling", "detached chat tracks running action")
+                options.on_tool_finish({ name = "search_book", arguments = { query = "history" } })
+                same(chat.stream_status.state, "finished", "detached chat tracks finished action")
+                return "The full answer after book actions.", nil, { trace = { "search_book" } }, {
+                    requests = 2,
+                    measured_requests = 2,
+                    input_tokens = 80,
+                    output_tokens = 20,
+                    total_tokens = 100,
+                }
+            end,
+        },
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function()
+                return { currentPosition = function() end }
+            end,
+        },
+        provider_registry = {
+            newProvider = function() return {} end,
+        },
+        storage = {
+            save = function(_, _, make_active)
+                table.insert(saved_active, make_active)
+                return true
+            end,
+        },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() end },
+        conversation = conversation,
+        context = { ui = { document = document }, document = document },
+    }
+    plugin.active_chat = chat
+    chat.viewer = { update = function() end }
+
+    chat:_send("Keep working after I leave")
+
+    same(cancel_count, 0, "closing viewer does not cancel stream")
+    same(plugin.running_chat, nil, "completed chat releases background ownership")
+    same(chat.busy, false, "chat is no longer busy")
+    same(chat.closed, true, "chat stays detached after completion")
+    same(#conversation.messages, 2, "question and complete answer saved")
+    same(conversation.messages[2].content, "The full answer after book actions.", "complete answer")
+    same(conversation.messages[2].provenance[1], "search_book", "book action history")
+    same(saved_active[1], true, "sending chat remains active")
+    same(saved_active[2], false, "detached completion does not change active chat")
+end)
+
+test("non-streaming request uses the background transport", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local used_background_transport = false
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function()
+                return { currentPosition = function() end }
+            end,
+        },
+        provider_registry = {
+            newProvider = function(_, _, transport, stream_transport)
+                same(stream_transport, nil, "SSE transport disabled")
+                return {
+                    chat = function()
+                        local ok, code, body = transport("https://example.test", {}, "{}", 60, true)
+                        truthy(ok, "background request")
+                        same(code, 200, "background status")
+                        return { text = body }
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = {
+            httpPost = function(_, _, _, _, _, on_chunk, control)
+                used_background_transport = true
+                same(on_chunk, nil, "complete response mode")
+                truthy(control, "request can be stopped")
+                return true, 200, "Complete background answer.", "OK"
+            end,
+        },
+        conversation = conversation,
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+
+    chat:_send("Use one complete response")
+
+    truthy(used_background_transport, "background transport used")
+    same(conversation.messages[2].content, "Complete background answer.", "complete response saved")
+end)
+
+test("background save does not replace another active chat", function()
+    local factory = memorySettingsFactory()
+    local storage = Storage:new{
+        root = "/virtual/insightful/conversations",
+        settings_factory = factory,
+        make_path = function() end,
+        now = function() return 100 end,
+    }
+    local book = storage:getBook(fakeUI("active", "/books/active.epub", "Active Book"))
+    local first = storage:load(book)
+    table.insert(first.messages, { role = "user", content = "First question" })
+    truthy(storage:save(first), "save first chat")
+    local second = assert(storage:create(book))
+
+    table.insert(first.messages, { role = "assistant", content = "Background answer" })
+    truthy(storage:save(first, false), "save detached answer")
+
+    same(storage:load(book).id, second.id, "second chat remains active")
+end)
+
 test("book tools expose bounded search, read, links, toc, and position", function()
     local document = {
         info = { number_of_pages = 20, has_pages = false },
@@ -1076,6 +1221,9 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     contains(main_source, 'text = _("All books")', "all-book statistics menu")
     contains(main_source, "function Insightful:openFromHighlight", "highlighted actions choose their chat")
     contains(main_source, "return self:startNewChat(selection, quick_action, focus_input)", "highlighted action can start a new chat")
+    contains(main_source, "running_chat:isConversation(conversation)", "running chat is reused when reopened")
+    contains(main_source, "running_chat:reopen(selection, quick_action)", "running chat viewer is reattached")
+    contains(main_source, "running_chat:shutdown()", "plugin shutdown cancels remaining work")
     truthy(not chat_source:find("_startNewConversationForSend", 1, true), "messages inside a chat never create another chat")
     local chat_list_file = assert(io.open(root .. "/chat_list.lua", "r"))
     local chat_list_source = chat_list_file:read("*a")

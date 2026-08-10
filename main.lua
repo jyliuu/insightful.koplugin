@@ -128,6 +128,13 @@ function Insightful:_showStorageError(message, err)
 end
 
 function Insightful:_openConversation(conversation, selection, quick_action, focus_input)
+    local running_chat = self.running_chat
+    if running_chat and running_chat.busy and running_chat:isConversation(conversation) then
+        if self.active_chat and self.active_chat ~= running_chat then self.active_chat:close() end
+        self.active_chat = running_chat
+        running_chat:reopen(selection, quick_action)
+        return running_chat
+    end
     if self.active_chat then self.active_chat:close() end
     local chat = Chat:new{
         plugin = self,
@@ -149,6 +156,7 @@ function Insightful:_openConversation(conversation, selection, quick_action, foc
     }
     self.active_chat = chat
     chat:show(focus_input, quick_action)
+    return chat
 end
 
 local function formatCount(value)
@@ -383,7 +391,11 @@ function Insightful:addToMainMenu(menu_items)
 end
 
 function Insightful:onClose()
-    if self.active_chat then self.active_chat:close() end
+    local active_chat = self.active_chat
+    local running_chat = self.running_chat
+    if active_chat then active_chat:close() end
+    if running_chat then running_chat:shutdown() end
+    self.running_chat = nil
 end
 
 Insightful.onCloseWidget = Insightful.onClose

@@ -361,7 +361,7 @@ function Storage:load(book, chat_id)
     return copyTable(conversation)
 end
 
-function Storage:save(conversation)
+function Storage:save(conversation, make_active)
     if type(conversation) ~= "table" or type(conversation.book) ~= "table" then
         return nil, "invalid conversation"
     end
@@ -378,7 +378,7 @@ function Storage:save(conversation)
     else
         table.insert(state.chats, normalised)
     end
-    state.active_chat_id = normalised.id
+    if make_active ~= false then state.active_chat_id = normalised.id end
     local ok, flush_err = self:_flush(settings, state)
     if not ok then return nil, flush_err end
     return true
