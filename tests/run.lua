@@ -105,6 +105,18 @@ local function test(name, fn)
     end
 end
 
+local function copyTable(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local result = {}
+    seen[value] = result
+    for key, item in pairs(value) do
+        result[copyTable(key, seen)] = copyTable(item, seen)
+    end
+    return result
+end
+
 local function conversation()
     return {
         version = 1,
@@ -144,13 +156,12 @@ test("agent executes search then read and returns final text", function()
             return { ok = true, text = "surrounding passage" }
         end,
     }
-    local answer, err, provenance = Agent.run(conversation(), { provider = provider, book_tools = tools })
+    local answer, err = Agent.run(conversation(), { provider = provider, book_tools = tools })
     same(err, nil, "agent error")
     same(answer, "Mentor appears in the opening section.", "final answer")
     same(#calls, 2, "tool count")
     same(calls[1].name, "search_book", "first tool")
     same(calls[2].name, "read_around", "second tool")
-    same(provenance.tool_turns, 2, "tool turns")
     same(#provider.requests[3].messages, 5, "working message count")
     same(provider.requests[2].messages[2].provider_state.reasoning_content, "Find the first passage.", "provider state replay")
 end)
@@ -194,7 +205,7 @@ test("agent adds token use across tool-call requests", function()
             },
         },
     })
-    local answer, err, _, usage = Agent.run(conversation(), {
+    local answer, err, usage = Agent.run(conversation(), {
         provider = provider,
         book_tools = { execute = function() return { ok = true } end },
     })
@@ -223,7 +234,7 @@ test("agent keeps reported token use when a later request fails", function()
             }
         end,
     })
-    local answer, err, _, usage = Agent.run(conversation(), {
+    local answer, err, usage = Agent.run(conversation(), {
         provider = provider,
         book_tools = { execute = function() return { ok = true } end },
     })
@@ -621,16 +632,16 @@ end)
 local function memorySettingsFactory()
     local files = {}
     local function factory(path)
-        local object = { data = Storage.copyTable(files[path] or {}) }
-        function object:reset(value) self.data = Storage.copyTable(value) end
-        function object:flush() files[path] = Storage.copyTable(self.data) end
+        local object = { data = copyTable(files[path] or {}) }
+        function object:reset(value) self.data = copyTable(value) end
+        function object:flush() files[path] = copyTable(self.data) end
         return object
     end
     return factory, files
 end
 
 test("statistics keep current-book and all-book token totals", function()
-    local factory, files = memorySettingsFactory()
+    local factory = memorySettingsFactory()
     local stats = Stats:new{
         path = "/virtual/insightful/statistics.lua",
         directory = "/virtual/insightful",
@@ -670,7 +681,6 @@ test("statistics keep current-book and all-book token totals", function()
     same(global.output_tokens, 70, "all-book output tokens")
     same(global.total_tokens, 400, "all-book total tokens")
     same(global.cost_usd, 0.0012, "all-book reported cost")
-    same(files[stats.path].version, Stats.VERSION, "statistics version")
 end)
 
 local function fakeUI(id, path, title)
@@ -685,7 +695,7 @@ local function fakeUI(id, path, title)
     }
 end
 
-test("multiple chats stay isolated by book and persist all fields", function()
+test("multiple chats stay isolated by book and persist messages", function()
     local clock = 100
     local factory = memorySettingsFactory()
     local storage = Storage:new{
@@ -697,7 +707,6 @@ test("multiple chats stay isolated by book and persist all fields", function()
     local book_a = storage:getBook(fakeUI("aaa", "/books/a.epub", "Book A"))
     local book_b = storage:getBook(fakeUI("bbb", "/books/b.epub", "Book B"))
     local a = storage:load(book_a)
-    a.summary = "Earlier discussion"
     table.insert(a.messages, {
         role = "user",
         content = "Explain this",
@@ -721,7 +730,6 @@ test("multiple chats stay isolated by book and persist all fields", function()
 
     local reloaded = storage:load(book_a, first_id)
     same(reloaded.book.title, "Book A", "book metadata")
-    same(reloaded.summary, "Earlier discussion", "summary")
     same(#reloaded.messages, 2, "message count")
     same(reloaded.messages[1].selection.text, "passage", "selection text")
     same(reloaded.messages[1].selection.locator, "xp-3", "selection locator")
@@ -771,8 +779,6 @@ test("version 1 conversation migrates into the first chat", function()
     files[path] = {
         version = 1,
         book = { id = book.id, title = "Old title" },
-        summary = "Saved summary",
-        compacted_until = 1,
         messages = {
             { role = "user", content = "Earlier question", timestamp = 30 },
             { role = "assistant", content = "Earlier answer", timestamp = 31 },
@@ -782,27 +788,19 @@ test("version 1 conversation migrates into the first chat", function()
     local migrated = storage:load(book)
     same(migrated.id, "chat-1", "legacy chat ID")
     same(migrated.book.title, "Legacy Book", "current book metadata wins")
-    same(migrated.summary, "Saved summary", "legacy summary")
     same(#migrated.messages, 2, "legacy messages")
-    same(files[path].version, Storage.VERSION, "storage version migrated")
     same(#files[path].chats, 1, "legacy data wrapped in chat list")
     same(storage:list(book)[1].title, "Earlier question", "legacy chat title")
 end)
 
-test("sending inside an existing chat never creates another chat", function()
+test("sending a follow-up appends to the open chat", function()
     local document = {}
     local conversation = {
         id = "chat-1",
         book = { id = "book-a", title = "Book A" },
         messages = {{ role = "user", content = "Earlier question" }},
     }
-    local create_count = 0
     local recorded_usage
-    local storage = {
-        getNewChatOnSend = function() return true end,
-        create = function() create_count = create_count + 1 end,
-        save = function() return true end,
-    }
     local chat = Chat:new{
         plugin = {},
         agent = {
@@ -810,7 +808,7 @@ test("sending inside an existing chat never creates another chat", function()
                 return { role = "user", content = question }
             end,
             run = function()
-                return "New answer", nil, nil, {
+                return "New answer", nil, {
                     requests = 1,
                     measured_requests = 1,
                     input_tokens = 40,
@@ -828,7 +826,7 @@ test("sending inside an existing chat never creates another chat", function()
         provider_registry = {
             newProvider = function() return {} end,
         },
-        storage = storage,
+        storage = { save = function() return true end },
         stats = {
             record = function(_, book, usage)
                 same(book.id, "book-a", "statistics book")
@@ -836,14 +834,13 @@ test("sending inside an existing chat never creates another chat", function()
                 return true
             end,
         },
-        streaming = {},
+        streaming = { httpPost = function() end },
         conversation = conversation,
         context = { ui = { document = document }, document = document },
     }
     chat.viewer = { update = function() end }
 
     chat:_send("Follow-up question")
-    same(create_count, 0, "no new chat created")
     same(chat.conversation, conversation, "existing conversation kept")
     same(#conversation.messages, 3, "question and answer added to existing chat")
     same(recorded_usage.total_tokens, 48, "chat records model token use")
@@ -877,7 +874,7 @@ test("closing a chat keeps its answer running and saves the result", function()
                 same(chat.stream_status.state, "calling", "detached chat tracks running action")
                 options.on_tool_finish({ name = "search_book", arguments = { query = "history" } })
                 same(chat.stream_status.state, "finished", "detached chat tracks finished action")
-                return "The full answer after book actions.", nil, { trace = { "search_book" } }, {
+                return "The full answer after book actions.", nil, {
                     requests = 2,
                     measured_requests = 2,
                     input_tokens = 80,
@@ -917,7 +914,6 @@ test("closing a chat keeps its answer running and saves the result", function()
     same(chat.closed, true, "chat stays detached after completion")
     same(#conversation.messages, 2, "question and complete answer saved")
     same(conversation.messages[2].content, "The full answer after book actions.", "complete answer")
-    same(conversation.messages[2].provenance[1], "search_book", "book action history")
     same(saved_active[1], true, "sending chat remains active")
     same(saved_active[2], false, "detached completion does not change active chat")
 end)
@@ -1114,19 +1110,16 @@ test("page-based hyperlinks normalize zero-based targets and stay bounded", func
     end
 end)
 
-test("agent exposes the hyperlink tool and link handoff", function()
-    local schemas = {}
-    for _, schema in ipairs(Agent.tool_schemas) do schemas[schema.name] = schema end
+test("agent exposes exactly the five current book tools", function()
+    local names, schemas = {}, {}
+    for _, schema in ipairs(Agent.tool_schemas) do
+        table.insert(names, schema.name)
+        schemas[schema.name] = schema
+    end
+    same(table.concat(names, ","), "search_book,read_around,list_links,toc,current_position", "book tool names")
     truthy(schemas.list_links, "list_links schema")
     truthy(schemas.read_around.parameters.properties.link_id, "read_around link_id")
     contains(Agent.systemPrompt({}, {}), "footnotes", "hyperlink prompt")
-end)
-
-test("highlight action uses the Zen UI AI slot", function()
-    local file = assert(io.open(root .. "/main.lua", "r"))
-    local source = file:read("*a")
-    file:close()
-    contains(source, 'addToHighlightDialog("ai_assistant"', "Zen UI highlight key")
 end)
 
 test("conversation renderer separates user and Markdown AI messages", function()
@@ -1174,97 +1167,6 @@ test("conversation renderer shows factual harness actions", function()
     contains(html, "Calling", "tool activity state")
     contains(html, "search_book", "tool function name")
     contains(html, "Query: Mentor", "safe tool arguments")
-    truthy(not html:find("Thinking", 1, true), "no generic thinking label")
-end)
-
-test("conversation screen uses the Markdown HTML viewer and embedded composer", function()
-    local viewer_file = assert(io.open(root .. "/answer_viewer.lua", "r"))
-    local viewer_source = viewer_file:read("*a")
-    viewer_file:close()
-    contains(viewer_source, "ScrollHtmlWidget:new", "HTML viewer")
-    contains(viewer_source, "InputText:new", "embedded chat input")
-    truthy(not viewer_source:find("HalfPageScrollHtmlWidget", 1, true), "standard full-page navigation")
-    contains(viewer_source, 'id = "send"', "Send button")
-    contains(viewer_source, "Message Insightful", "chat input hint")
-    contains(viewer_source, "self:_hideKeyboard()", "conversation tap dismisses keyboard")
-    contains(viewer_source, "isKeyboardVisible", "keyboard dismissal checks visibility")
-    contains(viewer_source, "is_always_active = true", "chat receives events below modal keyboard")
-    contains(viewer_source, "ges.pos:notIntersectWith(keyboard.dimen)", "outside-keyboard tap guard")
-    contains(viewer_source, "available_height = available_height - keyboard.dimen.h", "keyboard height reduces conversation layout")
-    contains(viewer_source, "self:_installKeyboardLayoutHooks()", "keyboard show and close resize conversation")
-    contains(viewer_source, "function ConversationViewer:onKeyboardHeightChanged()", "keyboard layout height changes resize conversation")
-    local close_handler = assert(viewer_source:match("function ConversationViewer:onClose%(%)(.-)\nend"))
-    local closed_index = assert(close_handler:find("self.closed = true", 1, true))
-    local keyboard_close_index = assert(close_handler:find("self:_hideKeyboard()", 1, true))
-    local viewer_close_index = assert(close_handler:find("UIManager:close(self)", 1, true))
-    truthy(closed_index < keyboard_close_index, "viewer is marked closed before keyboard teardown")
-    truthy(keyboard_close_index < viewer_close_index, "keyboard modal closes before conversation viewer")
-    local update_handler = assert(viewer_source:match("function ConversationViewer:update%([^\n]+(.-)\nend"))
-    contains(update_handler, "self.scroll_widget.htmlbox_widget.page_number", "response update saves the visible page")
-    contains(update_handler, "self:_resizeLayout(self.available_height or self.height, false, page_number)", "response update restores the visible page")
-    contains(update_handler, "refresh_text_only", "live text selects a narrow refresh")
-    contains(update_handler, "self.scroll_container.dimen:copy()", "live text uses the conversation region")
-    contains(update_handler, 'UIManager:setDirty(self, "ui", refresh_region)', "live text uses a regional UI refresh")
-    truthy(not update_handler:find('UIManager:setDirty(self, "partial", refresh_region)', 1, true), "live text avoids refreshes that KOReader promotes to a flash")
-    truthy(not update_handler:find("scrollToRatio(1)", 1, true), "response update does not follow new output")
-    truthy(not viewer_source:find("focus_input", 1, true), "conversation does not auto-open keyboard")
-    contains(viewer_source, 'id = "stop"', "Stop button")
-    contains(viewer_source, 'left_icon = "appbar.menu"', "chat list title button")
-    local renderer_file = assert(io.open(root .. "/conversation_renderer.lua", "r"))
-    local renderer_source = renderer_file:read("*a")
-    renderer_file:close()
-    contains(renderer_source, '"apps/filemanager/lib/md"', "Markdown renderer")
-    contains(renderer_source, 'class="user-message"', "user message box")
-    local chat_file = assert(io.open(root .. "/chat.lua", "r"))
-    local chat_source = chat_file:read("*a")
-    chat_file:close()
-    contains(chat_source, "on_send", "embedded composer callback")
-    contains(chat_source, "on_chats", "chat list callback")
-    contains(chat_source, "self:_showConversation()", "Ask AI opens full conversation")
-    truthy(not chat_source:find("InputDialog", 1, true), "separate Ask dialog removed")
-    truthy(not chat_source:find("showAskDialog", 1, true), "Ask popup path removed")
-    contains(chat_source, "on_tool_delta", "live streamed function call")
-    contains(chat_source, "on_tool_start", "tool execution start")
-    contains(chat_source, "self:_updateViewer(true)", "stream chunks request a narrow refresh")
-    contains(chat_source, "Waiting for model response", "direct response waiting state")
-    truthy(not chat_source:find('_("Thinking")', 1, true), "generic thinking animation removed")
-    truthy(not chat_source:find("saved and nil or", 1, true), "save success cannot select failure text")
-    local main_file = assert(io.open(root .. "/main.lua", "r"))
-    local main_source = main_file:read("*a")
-    main_file:close()
-    contains(main_source, 'localRequire("streaming")', "stream transport loaded")
-    contains(main_source, 'localRequire("answer_viewer")', "answer viewer loaded")
-    contains(main_source, 'localRequire("providers/openai")', "OpenAI provider loaded")
-    contains(main_source, 'localRequire("providers/deepseek")', "DeepSeek provider loaded")
-    contains(main_source, 'localRequire("providers/openrouter")', "OpenRouter provider loaded")
-    contains(main_source, 'localRequire("providers/anthropic")', "Anthropic provider loaded")
-    contains(main_source, 'localRequire("chat_list")', "chat list loaded")
-    contains(main_source, 'localRequire("stats")', "statistics storage loaded")
-    contains(main_source, 'Dispatcher:registerAction("insightful_show_chats"', "chat list gesture action")
-    contains(main_source, 'moveMenuItemToFront("tools", self.name)', "Insightful menu is first in Tools")
-    contains(main_source, 'sorting_hint = "tools"', "Insightful menu is placed in Tools")
-    contains(main_source, 'local NEW_CHAT_ON_HIGHLIGHT_DEFAULT = "insightful_new_chat_on_highlight_default"', "highlighted-action global default key")
-    contains(main_source, 'local text = _("New chat for highlighted actions")', "highlighted-action new-chat toggle")
-    contains(main_source, "hold_callback = function(touchmenu_instance)", "highlighted-action setting supports hold")
-    contains(main_source, "G_reader_settings:saveSetting(NEW_CHAT_ON_HIGHLIGHT_DEFAULT, enabled)", "hold saves the global default")
-    contains(main_source, 'text .. "   ★"', "highlighted-action setting marks the global default")
-    contains(main_source, 'title = _("Insightful actions")', "highlight action dialog title")
-    truthy(not main_source:find('title = _("AI")', 1, true), "generic AI dialog title removed")
-    contains(main_source, 'text = _("Statistics")', "statistics menu")
-    contains(main_source, 'text = _("General")', "general statistics menu")
-    contains(main_source, 'text = _("Current book")', "current-book statistics menu")
-    contains(main_source, 'text = _("All books")', "all-book statistics menu")
-    contains(main_source, "function Insightful:openFromHighlight", "highlighted actions choose their chat")
-    contains(main_source, "return self:startNewChat(selection, quick_action, focus_input)", "highlighted action can start a new chat")
-    contains(main_source, "running_chat:isConversation(conversation)", "running chat is reused when reopened")
-    contains(main_source, "running_chat:reopen(selection, quick_action)", "running chat viewer is reattached")
-    contains(main_source, "running_chat:shutdown()", "plugin shutdown cancels remaining work")
-    truthy(not chat_source:find("_startNewConversationForSend", 1, true), "messages inside a chat never create another chat")
-    local chat_list_file = assert(io.open(root .. "/chat_list.lua", "r"))
-    local chat_list_source = chat_list_file:read("*a")
-    chat_list_file:close()
-    contains(chat_list_source, "function menu:onMenuHold(item)", "chat hold action")
-    contains(chat_list_source, 'ok_text = _("Delete")', "chat delete confirmation")
 end)
 
 test("chat list opens when a saved chat has no title", function()

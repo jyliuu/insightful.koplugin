@@ -44,7 +44,8 @@ function ChatList.show(options)
         },
     }
 
-    for chat_index, chat in ipairs(chats) do
+    for chat_index = 1, #chats do
+        local chat = chats[chat_index]
         local chat_id = chat.id
         table.insert(item_table, {
             text = chat.title or _("New chat"),

@@ -115,7 +115,7 @@ function Storage:new(options)
     return instance
 end
 
-function Storage.forUI(ui, options)
+function Storage.forUI(options)
     options = options or {}
     local DataStorage = require("datastorage")
     local LuaSettings = require("luasettings")
@@ -127,7 +127,6 @@ function Storage.forUI(ui, options)
         make_path = util.makePath,
         partial_md5 = util.partialMD5,
         new_chat_on_send_default = options.new_chat_on_send_default,
-        ui = ui,
     }
 end
 
@@ -212,8 +211,6 @@ function Storage:newConversation(book, id, timestamp)
         title = nil,
         created_at = timestamp,
         updated_at = timestamp,
-        summary = nil,
-        compacted_until = 0,
         messages = {},
     }
 end
@@ -228,8 +225,6 @@ function Storage:_normaliseConversation(conversation, book, fallback_id)
     conversation.title = boundedTitle(conversation.title) or titleFromMessages(messages)
     conversation.created_at = tonumber(conversation.created_at) or created_at
     conversation.updated_at = tonumber(conversation.updated_at) or updated_at
-    conversation.summary = conversation.summary or nil
-    conversation.compacted_until = tonumber(conversation.compacted_until) or 0
     conversation.messages = messages
     return conversation
 end
@@ -453,10 +448,5 @@ function Storage:setNewChatOnSend(book, enabled)
     state.new_chat_on_send_override = true
     return self:_flush(settings, state)
 end
-
-Storage.copyTable = copyTable
-Storage.VERSION = VERSION
-Storage.LEGACY_VERSION = LEGACY_VERSION
-Storage.CHAT_TITLE_LENGTH = CHAT_TITLE_LENGTH
 
 return Storage

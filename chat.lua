@@ -58,7 +58,7 @@ function Chat:new(options)
     instance.storage = assert(options.storage)
     instance.stats = assert(options.stats)
     instance.viewer_class = assert(options.answer_viewer_class)
-    instance.streaming = assert(options.streaming)
+    instance.http_post = assert(options.streaming and options.streaming.httpPost)
     instance.conversation = assert(options.conversation)
     instance.context = assert(options.context)
     instance.configuration = options.configuration or {}
@@ -96,22 +96,11 @@ end
 
 function Chat:_transport()
     return function(url, headers, body, timeout, verify_ssl)
-        if type(self.streaming.httpPost) == "function" then
-            return self.streaming.httpPost(
-                url, headers, body, timeout, verify_ssl, nil, self.stream_control
-            )
-        end
-        local completed, ok, code, response_body, status = Trapper:dismissableRunInSubprocess(function()
-            local request_ok, request_code, request_body, request_status =
-                self.agent.httpPost(url, headers, body, timeout, verify_ssl)
-            return request_ok, request_code, request_body, request_status
-        end, _("Waiting for model response… (tap to cancel)"))
-        if not completed then return false, nil, "", _("Request canceled.") end
-        return ok, code, response_body, status
+        return self.http_post(url, headers, body, timeout, verify_ssl, nil, self.stream_control)
     end
 end
 
-function Chat:_errorText(err)
+local function errorText(err)
     err = tostring(err or "")
     if err:find("API key is missing", 1, true) then
         return _("Insightful is not configured. Copy configuration.lua.sample to configuration.lua and set api_key.")
@@ -180,7 +169,7 @@ function Chat:reopen(selection, quick_action)
     self.closed = false
     if not self.busy then self.pending_selection = selection end
     if #self.stream_pending > 0 then self:_flushStream() end
-    return self:show(nil, self.busy and nil or quick_action)
+    return self:show(self.busy and nil or quick_action)
 end
 
 function Chat:_flushStream()
@@ -288,13 +277,12 @@ function Chat:_send(question, selection, display_content)
 
     local book_tools = self.book_tools_class:new(self.context)
     local position = book_tools:currentPosition()
-    local background_transport = type(self.streaming.httpPost) == "function"
-    local stream_enabled = self.configuration.stream ~= false and background_transport
-    self.stream_control = background_transport and {} or nil
+    local stream_enabled = self.configuration.stream ~= false
+    self.stream_control = {}
     local provider, provider_err = self.provider_registry:newProvider(
         self.configuration,
         self:_transport(),
-        stream_enabled and self.streaming.httpPost or nil
+        stream_enabled and self.http_post or nil
     )
     if not provider then
         self.stream_control = nil
@@ -303,7 +291,7 @@ function Chat:_send(question, selection, display_content)
         self:_updateViewer()
         return
     end
-    local answer, err, provenance, usage = self.agent.run(self.conversation, {
+    local answer, err, usage = self.agent.run(self.conversation, {
         provider = provider,
         book_tools = book_tools,
         position = position,
@@ -336,7 +324,6 @@ function Chat:_send(question, selection, display_content)
             role = "assistant",
             content = answer,
             timestamp = os.time(),
-            provenance = provenance and provenance.trace or nil,
         })
         local saved, save_err = self:_save(not self.closed)
         self.stream_text = ""
@@ -348,7 +335,7 @@ function Chat:_send(question, selection, display_content)
     else
         logger.warn("Insightful: request failed:", err)
         self.stream_text = ""
-        self.stream_status = self:_errorText(err)
+        self.stream_status = errorText(err)
     end
     self:_finishRun()
     self:_updateViewer()
@@ -365,14 +352,12 @@ function Chat:sendQuickAction(action_key)
     self:send(prompt, self.pending_selection, QUICK_LABELS[action_key])
 end
 
-function Chat:show(_, quick_action)
+function Chat:show(quick_action)
+    self:_showConversation()
     if quick_action then
-        self:_showConversation()
         UIManager:nextTick(function()
             if not self.closed then self:sendQuickAction(quick_action) end
         end)
-    else
-        self:_showConversation()
     end
     return self
 end
