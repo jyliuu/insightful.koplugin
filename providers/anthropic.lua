@@ -21,6 +21,24 @@ local function apiError(decoded)
     return tostring(err.message or err.type or "provider error")
 end
 
+local function tokenUsage(raw)
+    if type(raw) ~= "table" then return nil end
+    local uncached_input = tonumber(raw.input_tokens)
+    local cache_creation = tonumber(raw.cache_creation_input_tokens)
+    local cache_read = tonumber(raw.cache_read_input_tokens)
+    local output_tokens = tonumber(raw.output_tokens)
+    if not uncached_input and not cache_creation and not cache_read and not output_tokens then return nil end
+    local input_tokens = math.max(0, math.floor(uncached_input or 0))
+        + math.max(0, math.floor(cache_creation or 0))
+        + math.max(0, math.floor(cache_read or 0))
+    output_tokens = math.max(0, math.floor(output_tokens or 0))
+    return {
+        input_tokens = input_tokens,
+        output_tokens = output_tokens,
+        total_tokens = input_tokens + output_tokens,
+    }
+end
+
 function Anthropic:new(configuration, transport, stream_transport)
     local instance = setmetatable({}, self)
     instance.configuration = configuration or {}
@@ -70,6 +88,7 @@ function Anthropic:_newStreamAccumulator(json, on_delta, on_activity, on_tool_de
         tool_calls = {},
         event_count = 0,
         stop_reason = nil,
+        usage = nil,
         error = nil,
     }
 
@@ -85,6 +104,8 @@ function Anthropic:_newStreamAccumulator(json, on_delta, on_activity, on_tool_de
         accumulator.event_count = accumulator.event_count + 1
         if decoded.type == "error" then
             accumulator.error = "AI provider error: " .. tostring(apiError(decoded) or "streaming request failed")
+        elseif decoded.type == "message_start" and type(decoded.message) == "table" then
+            accumulator.usage = tokenUsage(decoded.message.usage) or accumulator.usage
         elseif decoded.type == "content_block_start" then
             local block = decoded.content_block
             local index = tonumber(decoded.index) or 0
@@ -128,6 +149,17 @@ function Anthropic:_newStreamAccumulator(json, on_delta, on_activity, on_tool_de
             end
         elseif decoded.type == "message_delta" and type(decoded.delta) == "table" then
             accumulator.stop_reason = decoded.delta.stop_reason or accumulator.stop_reason
+            local delta_usage = tokenUsage(decoded.usage)
+            if delta_usage then
+                local start_usage = accumulator.usage or {}
+                accumulator.usage = {
+                    input_tokens = delta_usage.input_tokens > 0
+                        and delta_usage.input_tokens or tonumber(start_usage.input_tokens) or 0,
+                    output_tokens = delta_usage.output_tokens,
+                }
+                accumulator.usage.total_tokens = accumulator.usage.input_tokens
+                    + accumulator.usage.output_tokens
+            end
         end
     end
 
@@ -161,10 +193,12 @@ function Anthropic:_newStreamAccumulator(json, on_delta, on_activity, on_tool_de
             self.buffer = ""
         end
         dispatchEvent()
-        if self.error then return nil, self.error end
-        if self.event_count == 0 then return nil, "The AI service returned an invalid Anthropic stream." end
+        if self.error then return nil, self.error, self.usage end
+        if self.event_count == 0 then
+            return nil, "The AI service returned an invalid Anthropic stream.", self.usage
+        end
         local stop_error = stopError(self.stop_reason)
-        if stop_error then return nil, stop_error end
+        if stop_error then return nil, stop_error, self.usage end
         local calls, indexes = {}, {}
         for index in pairs(self.tool_calls) do table.insert(indexes, index) end
         table.sort(indexes)
@@ -174,7 +208,7 @@ function Anthropic:_newStreamAccumulator(json, on_delta, on_activity, on_tool_de
             if raw_call.arguments_json ~= "" then
                 local ok, decoded = pcall(json.decode, raw_call.arguments_json)
                 if not ok or type(decoded) ~= "table" then
-                    return nil, "The AI service returned malformed tool arguments."
+                    return nil, "The AI service returned malformed tool arguments.", self.usage
                 end
                 arguments = decoded
             end
@@ -183,6 +217,7 @@ function Anthropic:_newStreamAccumulator(json, on_delta, on_activity, on_tool_de
         return {
             text = #self.text_parts > 0 and table.concat(self.text_parts) or nil,
             tool_calls = calls,
+            usage = self.usage,
         }
     end
 
@@ -257,10 +292,11 @@ function Anthropic:chat(request, on_delta, stream_control, on_activity, on_tool_
 
     local decoded_ok, decoded = pcall(json.decode, response_body or "")
     if not decoded_ok or type(decoded) ~= "table" then return nil, "The AI service returned invalid JSON." end
+    local usage = tokenUsage(decoded.usage)
     local upstream_error = apiError(decoded)
-    if upstream_error then return nil, "AI provider error: " .. upstream_error end
+    if upstream_error then return nil, "AI provider error: " .. upstream_error, usage end
     local stop_error = stopError(decoded.stop_reason)
-    if stop_error then return nil, stop_error end
+    if stop_error then return nil, stop_error, usage end
     local text_parts, calls = {}, {}
     for _, block in ipairs(decoded.content or {}) do
         if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
@@ -276,6 +312,7 @@ function Anthropic:chat(request, on_delta, stream_control, on_activity, on_tool_
     return {
         text = #text_parts > 0 and table.concat(text_parts) or nil,
         tool_calls = calls,
+        usage = usage,
     }
 end
 

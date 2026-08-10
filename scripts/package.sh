@@ -16,12 +16,16 @@ package_root="$stage_root/insightful.koplugin"
 archive_path="$output_dir/$archive_name"
 trap 'rm -rf "$stage_root"' EXIT HUP INT TERM
 
-mkdir -p "$package_root" "$output_dir"
+mkdir -p "$package_root/providers" "$output_dir"
 
 for source in "$plugin_root"/*.lua; do
     name=${source##*/}
     [ "$name" = "configuration.lua" ] && continue
     cp "$source" "$package_root/$name"
+done
+
+for source in "$plugin_root"/providers/*.lua; do
+    cp "$source" "$package_root/providers/${source##*/}"
 done
 
 for name in VERSION LICENSE NOTICE configuration.lua.sample; do
@@ -47,7 +51,11 @@ unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/main\.lua$' || {
     printf '%s\n' "package failed: main.lua is missing from the archive" >&2
     exit 1
 }
-if unzip -Z1 "$archive_path" | grep -Ev '^insightful\.koplugin/[^/]+$' >/dev/null; then
+unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/providers/registry\.lua$' || {
+    printf '%s\n' "package failed: providers/registry.lua is missing from the archive" >&2
+    exit 1
+}
+if unzip -Z1 "$archive_path" | grep -Ev '^insightful\.koplugin/([^/]+|providers/[^/]+\.lua)$' >/dev/null; then
     printf '%s\n' "package failed: the archive contains an unexpected path" >&2
     exit 1
 fi

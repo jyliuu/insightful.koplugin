@@ -45,6 +45,25 @@ local function providerError(decoded)
     return tostring(err.message or err.type or err.code or "provider error")
 end
 
+local function tokenUsage(raw, include_cost)
+    if type(raw) ~= "table" then return nil end
+    local input_tokens = tonumber(raw.prompt_tokens)
+    local output_tokens = tonumber(raw.completion_tokens)
+    local total_tokens = tonumber(raw.total_tokens)
+    local cost_usd = include_cost and tonumber(raw.cost) or nil
+    if not input_tokens and not output_tokens and not total_tokens and not cost_usd then return nil end
+    input_tokens = math.max(0, math.floor(input_tokens or 0))
+    output_tokens = math.max(0, math.floor(output_tokens or 0))
+    total_tokens = math.max(0, math.floor(total_tokens or (input_tokens + output_tokens)))
+    local usage = {
+        input_tokens = input_tokens,
+        output_tokens = output_tokens,
+        total_tokens = total_tokens,
+    }
+    if cost_usd then usage.cost_usd = math.max(0, cost_usd) end
+    return usage
+end
+
 function Compatible:new(configuration, transport, stream_transport, variant)
     local instance = setmetatable({}, self)
     instance.configuration = configuration or {}
@@ -112,6 +131,7 @@ function Compatible:_newStreamAccumulator(json, on_delta, on_activity, on_tool_d
         tool_calls = {},
         event_count = 0,
         finish_reason = nil,
+        usage = nil,
         error = nil,
     }
 
@@ -138,6 +158,8 @@ function Compatible:_newStreamAccumulator(json, on_delta, on_activity, on_tool_d
         local upstream_error = providerError(decoded)
         if upstream_error then accumulator.error = "AI provider error: " .. upstream_error; return end
         accumulator.event_count = accumulator.event_count + 1
+        accumulator.usage = tokenUsage(decoded.usage, self.variant.id == "openrouter")
+            or accumulator.usage
         local choice = decoded.choices and decoded.choices[1]
         if type(choice) ~= "table" then return end
         if type(choice.finish_reason) == "string" then accumulator.finish_reason = choice.finish_reason end
@@ -218,18 +240,22 @@ function Compatible:_newStreamAccumulator(json, on_delta, on_activity, on_tool_d
             end
         end
         dispatchEvent()
-        if self.error then return nil, self.error end
-        if self.event_count == 0 then return nil, "The AI service returned an invalid streaming response." end
+        if self.error then return nil, self.error, self.usage end
+        if self.event_count == 0 then
+            return nil, "The AI service returned an invalid streaming response.", self.usage
+        end
         local finish_error = finishError(self.finish_reason)
-        if finish_error then return nil, finish_error end
+        if finish_error then return nil, finish_error, self.usage end
         local calls, indexes = {}, {}
         for index in pairs(self.tool_calls) do table.insert(indexes, index) end
         table.sort(indexes)
         for _, index in ipairs(indexes) do
             local raw_call = self.tool_calls[index]
-            if raw_call.name == "" then return nil, "The AI service returned an invalid tool call." end
+            if raw_call.name == "" then
+                return nil, "The AI service returned an invalid tool call.", self.usage
+            end
             local args, args_err = decodeArguments(json, raw_call.arguments_json)
-            if not args then return nil, args_err end
+            if not args then return nil, args_err, self.usage end
             table.insert(calls, {
                 id = raw_call.id ~= "" and raw_call.id or nil,
                 name = raw_call.name,
@@ -241,6 +267,7 @@ function Compatible:_newStreamAccumulator(json, on_delta, on_activity, on_tool_d
             text = #self.text_parts > 0 and table.concat(self.text_parts) or nil,
             provider_state = state,
             tool_calls = calls,
+            usage = self.usage,
         }
     end
 
@@ -278,7 +305,11 @@ function Compatible:chat(request, on_delta, stream_control, on_activity, on_tool
     local use_stream = config.stream ~= false
         and type(self.stream_transport) == "function"
         and type(on_delta) == "function"
-    if use_stream then body.stream = true end
+    if use_stream then
+        body.stream = true
+        body.stream_options = type(body.stream_options) == "table" and body.stream_options or {}
+        body.stream_options.include_usage = true
+    end
     local encoded = json.encode(body)
     local headers = {
         ["Content-Type"] = "application/json",
@@ -318,22 +349,25 @@ function Compatible:chat(request, on_delta, stream_control, on_activity, on_tool
 
     local decoded_ok, decoded = pcall(json.decode, response_body or "")
     if not decoded_ok or type(decoded) ~= "table" then return nil, "The AI service returned invalid JSON." end
+    local usage = tokenUsage(decoded.usage, self.variant.id == "openrouter")
     local upstream_error = providerError(decoded)
-    if upstream_error then return nil, "AI provider error: " .. upstream_error end
+    if upstream_error then return nil, "AI provider error: " .. upstream_error, usage end
     local choice = decoded.choices and decoded.choices[1]
     local message = type(choice) == "table" and choice.message
-    if type(message) ~= "table" then return nil, "The AI service returned an invalid response." end
+    if type(message) ~= "table" then
+        return nil, "The AI service returned an invalid response.", usage
+    end
     local finish_error = finishError(choice.finish_reason)
-    if finish_error then return nil, finish_error end
+    if finish_error then return nil, finish_error, usage end
     local calls = {}
     if type(message.tool_calls) == "table" then
         for _, raw_call in ipairs(message.tool_calls) do
             local fn = type(raw_call) == "table" and raw_call["function"]
             if type(fn) ~= "table" or type(fn.name) ~= "string" then
-                return nil, "The AI service returned an invalid tool call."
+                return nil, "The AI service returned an invalid tool call.", usage
             end
             local args, args_err = decodeArguments(json, fn.arguments)
-            if not args then return nil, args_err end
+            if not args then return nil, args_err, usage end
             table.insert(calls, { id = raw_call.id, name = fn.name, arguments = args })
         end
     end
@@ -341,6 +375,7 @@ function Compatible:chat(request, on_delta, stream_control, on_activity, on_tool
         text = responseText(message.content),
         provider_state = self:_providerState(message),
         tool_calls = calls,
+        usage = usage,
     }
 end
 
