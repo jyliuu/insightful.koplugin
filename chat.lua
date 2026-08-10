@@ -58,7 +58,7 @@ function Chat:new(options)
     instance.storage = assert(options.storage)
     instance.stats = assert(options.stats)
     instance.viewer_class = assert(options.answer_viewer_class)
-    instance.streaming = assert(options.streaming)
+    instance.http_post = assert(options.streaming and options.streaming.httpPost)
     instance.conversation = assert(options.conversation)
     instance.context = assert(options.context)
     instance.configuration = options.configuration or {}
@@ -74,25 +74,33 @@ function Chat:new(options)
     return instance
 end
 
-function Chat:_save()
-    local ok, err = self.storage:save(self.conversation)
+function Chat:_save(make_active)
+    local ok, err = self.storage:save(self.conversation, make_active)
     if not ok then logger.warn("Insightful: conversation save failed:", err) end
     return ok, err
 end
 
-function Chat:_transport()
-    return function(url, headers, body, timeout, verify_ssl)
-        local completed, ok, code, response_body, status = Trapper:dismissableRunInSubprocess(function()
-            local request_ok, request_code, request_body, request_status =
-                self.agent.httpPost(url, headers, body, timeout, verify_ssl)
-            return request_ok, request_code, request_body, request_status
-        end, _("Waiting for model response… (tap to cancel)"))
-        if not completed then return false, nil, "", _("Request canceled.") end
-        return ok, code, response_body, status
+function Chat:isConversation(conversation)
+    return type(conversation) == "table"
+        and type(conversation.book) == "table"
+        and conversation.id == self.conversation.id
+        and conversation.book.id == self.conversation.book.id
+end
+
+function Chat:_finishRun()
+    self.busy = false
+    if self.plugin and self.plugin.running_chat == self then
+        self.plugin.running_chat = nil
     end
 end
 
-function Chat:_errorText(err)
+function Chat:_transport()
+    return function(url, headers, body, timeout, verify_ssl)
+        return self.http_post(url, headers, body, timeout, verify_ssl, nil, self.stream_control)
+    end
+end
+
+local function errorText(err)
     err = tostring(err or "")
     if err:find("API key is missing", 1, true) then
         return _("Insightful is not configured. Copy configuration.lua.sample to configuration.lua and set api_key.")
@@ -116,13 +124,14 @@ function Chat:_errorText(err)
     return _("Couldn't reach the AI service.")
 end
 
-function Chat:_updateViewer()
+function Chat:_updateViewer(refresh_text_only)
     if self.closed or not self.viewer then return end
     self.viewer:update(
         self.conversation.messages,
         self.stream_text,
         self.stream_status,
-        self.busy
+        self.busy,
+        refresh_text_only == true
     )
 end
 
@@ -156,13 +165,20 @@ function Chat:_showConversation()
     UIManager:show(viewer)
 end
 
+function Chat:reopen(selection, quick_action)
+    self.closed = false
+    if not self.busy then self.pending_selection = selection end
+    if #self.stream_pending > 0 then self:_flushStream() end
+    return self:show(self.busy and nil or quick_action)
+end
+
 function Chat:_flushStream()
     self.stream_flush_task = nil
     if #self.stream_pending == 0 then return end
     self.stream_text = self.stream_text .. table.concat(self.stream_pending)
     self.stream_pending = {}
     self.stream_status = nil
-    self:_updateViewer()
+    self:_updateViewer(true)
 end
 
 function Chat:_setStreamStatus(text)
@@ -177,7 +193,7 @@ function Chat:_setStreamStatus(text)
 end
 
 function Chat:_streamDelta(delta)
-    if type(delta) ~= "string" or delta == "" or self.closed then return end
+    if type(delta) ~= "string" or delta == "" then return end
     table.insert(self.stream_pending, delta)
     if not self.stream_flush_task then
         self.stream_flush_task = function() self:_flushStream() end
@@ -201,7 +217,7 @@ function Chat:_streamStart()
 end
 
 function Chat:_streamToolDelta(call)
-    if self.closed or type(call) ~= "table" or trim(call.name) == "" then return end
+    if type(call) ~= "table" or trim(call.name) == "" then return end
     if type(self.stream_status) == "table"
         and self.stream_status.kind == "tool"
         and self.stream_status.name == call.name
@@ -212,13 +228,11 @@ function Chat:_streamToolDelta(call)
 end
 
 function Chat:_toolStart(call)
-    if self.closed then return end
     self:_setStreamStatus(toolStatus(call, "calling"))
-    UIManager:forceRePaint()
+    if not self.closed then UIManager:forceRePaint() end
 end
 
 function Chat:_toolFinish(call)
-    if self.closed then return end
     self.stream_text = ""
     self.stream_status = toolStatus(call, "finished")
     self:_updateViewer()
@@ -233,6 +247,14 @@ end
 function Chat:_send(question, selection, display_content)
     question = trim(question)
     if question == "" or self.busy or self.closed then return end
+    local running_chat = self.plugin and self.plugin.running_chat
+    if running_chat and running_chat ~= self and running_chat.busy then
+        self.stream_text = ""
+        self.stream_status = _("Another chat is still working on a response. Reopen it or wait for it to finish.")
+        self:_showConversation()
+        self:_updateViewer()
+        return
+    end
     if not self.context.ui or self.context.ui.document ~= self.context.document then
         self.stream_text = ""
         self.stream_status = _("The open document changed. Reopen Insightful from the current book.")
@@ -241,11 +263,12 @@ function Chat:_send(question, selection, display_content)
         return
     end
     self.busy = true
+    if self.plugin then self.plugin.running_chat = self end
     self.pending_selection = nil
     local user_message = self.agent.makeUserMessage(question, selection)
     user_message.display_content = display_content
     table.insert(self.conversation.messages, user_message)
-    self:_save()
+    self:_save(true)
     self.stream_text = ""
     self.stream_status = _("Waiting for model response…")
     self:_showConversation()
@@ -255,21 +278,20 @@ function Chat:_send(question, selection, display_content)
     local book_tools = self.book_tools_class:new(self.context)
     local position = book_tools:currentPosition()
     local stream_enabled = self.configuration.stream ~= false
-        and type(self.streaming.httpPost) == "function"
-    self.stream_control = stream_enabled and {} or nil
+    self.stream_control = {}
     local provider, provider_err = self.provider_registry:newProvider(
         self.configuration,
         self:_transport(),
-        stream_enabled and self.streaming.httpPost or nil
+        stream_enabled and self.http_post or nil
     )
     if not provider then
         self.stream_control = nil
         self.stream_status = tostring(provider_err or _("Unsupported AI provider."))
-        self.busy = false
+        self:_finishRun()
         self:_updateViewer()
         return
     end
-    local answer, err, provenance, usage = self.agent.run(self.conversation, {
+    local answer, err, usage = self.agent.run(self.conversation, {
         provider = provider,
         book_tools = book_tools,
         position = position,
@@ -302,9 +324,8 @@ function Chat:_send(question, selection, display_content)
             role = "assistant",
             content = answer,
             timestamp = os.time(),
-            provenance = provenance and provenance.trace or nil,
         })
-        local saved, save_err = self:_save()
+        local saved, save_err = self:_save(not self.closed)
         self.stream_text = ""
         if saved then
             self.stream_status = nil
@@ -314,9 +335,9 @@ function Chat:_send(question, selection, display_content)
     else
         logger.warn("Insightful: request failed:", err)
         self.stream_text = ""
-        self.stream_status = self:_errorText(err)
+        self.stream_status = errorText(err)
     end
-    self.busy = false
+    self:_finishRun()
     self:_updateViewer()
 end
 
@@ -331,14 +352,12 @@ function Chat:sendQuickAction(action_key)
     self:send(prompt, self.pending_selection, QUICK_LABELS[action_key])
 end
 
-function Chat:show(_, quick_action)
+function Chat:show(quick_action)
+    self:_showConversation()
     if quick_action then
-        self:_showConversation()
         UIManager:nextTick(function()
             if not self.closed then self:sendQuickAction(quick_action) end
         end)
-    else
-        self:_showConversation()
     end
     return self
 end
@@ -347,14 +366,14 @@ function Chat:_onViewerClosed(viewer)
     if self.viewer ~= viewer then return end
     self.viewer = nil
     self.closed = true
-    self:_cancelStream()
+    -- Closing the screen only detaches it. The running coroutine keeps this
+    -- controller alive until it saves the complete answer.
     if self.plugin and self.plugin.active_chat == self then self.plugin.active_chat = nil end
 end
 
 function Chat:close()
     if self.closed then return end
     self.closed = true
-    self:_cancelStream()
     if self.stream_flush_task then
         UIManager:unschedule(self.stream_flush_task)
         self.stream_flush_task = nil
@@ -367,6 +386,11 @@ function Chat:close()
         UIManager:close(viewer)
     end
     if self.plugin and self.plugin.active_chat == self then self.plugin.active_chat = nil end
+end
+
+function Chat:shutdown()
+    self:close()
+    self:_cancelStream()
 end
 
 return Chat

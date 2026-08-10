@@ -129,12 +129,6 @@ end
 
 function Agent.buildMessages(conversation)
     local messages = {}
-    if conversation.summary and trim(conversation.summary) ~= "" then
-        table.insert(messages, {
-            role = "user",
-            content = "[Summary of earlier conversation]\n" .. conversation.summary,
-        })
-    end
     for _, message in ipairs(conversation.messages or {}) do
         if message.role == "user" then
             table.insert(messages, { role = "user", content = Agent.renderUserMessage(message) })
@@ -190,8 +184,7 @@ function Agent.run(conversation, options)
     local provider = assert(options.provider, "provider is required")
     local book_tools = assert(options.book_tools, "book_tools is required")
     local messages = Agent.buildMessages(conversation)
-    local tool_turns, tool_calls = 0, 0
-    local trace = {}
+    local tool_turns = 0
     local usage = emptyUsage()
 
     while true do
@@ -204,23 +197,19 @@ function Agent.run(conversation, options)
             tools = Agent.tool_schemas,
         }, options.on_delta, options.stream_control, options.on_stream_activity, options.on_tool_delta)
         if not ok then
-            return nil, "Couldn't reach the AI service: " .. tostring(response), nil, usage
+            return nil, "Couldn't reach the AI service: " .. tostring(response), usage
         end
         if not response then
             if type(provider_usage) == "table" then addResponseUsage(usage, provider_usage) end
-            return nil, provider_err or "The AI service returned no response.", nil, usage
+            return nil, provider_err or "The AI service returned no response.", usage
         end
         addResponseUsage(usage, response.usage)
         local calls = type(response.tool_calls) == "table" and response.tool_calls or {}
         if #calls == 0 then
             if type(response.text) == "string" and trim(response.text) ~= "" then
-                return response.text, nil, {
-                    tool_turns = tool_turns,
-                    tool_calls = tool_calls,
-                    trace = trace,
-                }, usage
+                return response.text, nil, usage
             end
-            return nil, "The AI service returned neither text nor tool calls.", nil, usage
+            return nil, "The AI service returned neither text nor tool calls.", usage
         end
 
         if type(options.on_tools) == "function" then
@@ -246,7 +235,6 @@ function Agent.run(conversation, options)
 
         -- Execute every call from this model turn before making another request.
         for _, call in ipairs(assistant_turn.tool_calls) do
-            tool_calls = tool_calls + 1
             if type(options.on_tool_start) == "function" then
                 pcall(options.on_tool_start, call)
             end
@@ -254,7 +242,6 @@ function Agent.run(conversation, options)
             if type(options.on_tool_finish) == "function" then
                 pcall(options.on_tool_finish, call, result)
             end
-            table.insert(trace, call.name)
             table.insert(messages, {
                 role = "tool",
                 tool_call_id = call.id,
@@ -263,30 +250,6 @@ function Agent.run(conversation, options)
             })
         end
     end
-end
-
-function Agent.httpPost(url, headers, body, timeout, verify_ssl)
-    local ltn12 = require("ltn12")
-    local socketutil_ok, socketutil = pcall(require, "socketutil")
-    if socketutil_ok and socketutil and type(socketutil.set_timeout) == "function" then
-        socketutil:set_timeout(timeout or 60, timeout or 60)
-    end
-    local client
-    if tostring(url):match("^https://") then
-        client = require("ssl.https")
-        client.cert_verify = verify_ssl ~= false
-    else
-        client = require("socket.http")
-    end
-    local chunks = {}
-    local ok, code, response_headers, status = client.request{
-        url = url,
-        method = "POST",
-        headers = headers,
-        source = ltn12.source.string(body),
-        sink = ltn12.sink.table(chunks),
-    }
-    return ok ~= nil, code, table.concat(chunks), status, response_headers
 end
 
 return Agent

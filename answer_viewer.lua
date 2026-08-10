@@ -360,18 +360,26 @@ function ConversationViewer:init()
     self.scroll_widget:scrollToRatio(1)
 end
 
-function ConversationViewer:update(messages, stream_text, status, busy)
+function ConversationViewer:update(messages, stream_text, status, busy, refresh_text_only)
     if self.closed then return end
     local page_number = self.scroll_widget
         and self.scroll_widget.htmlbox_widget
         and self.scroll_widget.htmlbox_widget.page_number
+    local refresh_region
+    if refresh_text_only and self.scroll_container and self.scroll_container.dimen then
+        refresh_region = self.scroll_container.dimen:copy()
+    end
     self.messages = messages or self.messages
     self.stream_text = stream_text
     self.status = status
     self.busy = busy == true
     self.send_button:enableDisable(not self.busy)
     self:_resizeLayout(self.available_height or self.height, false, page_number)
-    UIManager:setDirty(self, "ui")
+    if refresh_region then
+        UIManager:setDirty(self, "ui", refresh_region)
+    else
+        UIManager:setDirty(self, "ui")
+    end
 end
 
 function ConversationViewer:onKeyboardHeightChanged()

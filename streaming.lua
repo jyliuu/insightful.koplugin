@@ -118,7 +118,10 @@ function Streaming.httpPost(url, headers, body, timeout, verify_ssl, on_chunk, c
 
     local raw_parts, raw_size = {}, 0
     local decoder = Streaming.newFrameDecoder(function(chunk)
-        if raw_size < MAX_ERROR_BODY then
+        if not on_chunk then
+            raw_size = raw_size + #chunk
+            table.insert(raw_parts, chunk)
+        elseif raw_size < MAX_ERROR_BODY then
             local remaining = MAX_ERROR_BODY - raw_size
             local kept = chunk:sub(1, remaining)
             raw_size = raw_size + #kept
@@ -146,7 +149,6 @@ function Streaming.httpPost(url, headers, body, timeout, verify_ssl, on_chunk, c
             cancelled = true
             ffiutil.terminateSubProcess(pid)
             scheduleCollection(ffiutil, UIManager, pid, parent_read_fd)
-            parent_read_fd = nil
             break
         end
 
@@ -162,12 +164,10 @@ function Streaming.httpPost(url, headers, body, timeout, verify_ssl, on_chunk, c
         if stream_error then
             ffiutil.terminateSubProcess(pid)
             scheduleCollection(ffiutil, UIManager, pid, parent_read_fd)
-            parent_read_fd = nil
             break
         end
         if ffiutil.isSubProcessDone(pid) then
             local tail = parent_read_fd and ffiutil.readAllFromFD(parent_read_fd) or ""
-            parent_read_fd = nil
             if tail and tail ~= "" then
                 local ok, err = Streaming.feedFrames(decoder, tail)
                 if not ok then stream_error = err end

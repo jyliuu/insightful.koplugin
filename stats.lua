@@ -177,7 +177,4 @@ function Stats:getGlobal()
     return copyTable(state.global)
 end
 
-Stats.VERSION = VERSION
-Stats.copyTable = copyTable
-
 return Stats

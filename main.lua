@@ -1,4 +1,5 @@
 local ButtonDialog = require("ui/widget/buttondialog")
+local ConfirmBox = require("ui/widget/confirmbox")
 local Dispatcher = require("dispatcher")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
@@ -9,6 +10,7 @@ local _ = require("gettext")
 
 local source = debug.getinfo(1, "S").source
 local PLUGIN_DIR = source:match("^@(.*/)") or ""
+local NEW_CHAT_ON_HIGHLIGHT_DEFAULT = "insightful_new_chat_on_highlight_default"
 
 local function localRequire(name)
     local key = "insightful." .. name
@@ -63,7 +65,11 @@ end
 
 function Insightful:init()
     self.configuration = loadConfiguration()
-    self.storage = Storage.forUI(self.ui)
+    self.storage = Storage.forUI({
+        new_chat_on_send_default = function()
+            return G_reader_settings:isTrue(NEW_CHAT_ON_HIGHLIGHT_DEFAULT)
+        end,
+    })
     self.stats = Stats.forUI()
     self:onDispatcherRegisterActions()
     moveMenuItemToFront("tools", self.name)
@@ -127,7 +133,14 @@ function Insightful:_showStorageError(message, err)
     })
 end
 
-function Insightful:_openConversation(conversation, selection, quick_action, focus_input)
+function Insightful:_openConversation(conversation, selection, quick_action)
+    local running_chat = self.running_chat
+    if running_chat and running_chat.busy and running_chat:isConversation(conversation) then
+        if self.active_chat and self.active_chat ~= running_chat then self.active_chat:close() end
+        self.active_chat = running_chat
+        running_chat:reopen(selection, quick_action)
+        return running_chat
+    end
     if self.active_chat then self.active_chat:close() end
     local chat = Chat:new{
         plugin = self,
@@ -144,11 +157,11 @@ function Insightful:_openConversation(conversation, selection, quick_action, foc
         context = {
             ui = self.ui,
             document = self.ui.document,
-            book_id = conversation.book.id,
         },
     }
     self.active_chat = chat
-    chat:show(focus_input, quick_action)
+    chat:show(quick_action)
+    return chat
 end
 
 local function formatCount(value)
@@ -242,7 +255,7 @@ function Insightful:showGlobalStatistics()
     self:_showStatistics(_("All books"), totals, err)
 end
 
-function Insightful:openChat(selection, quick_action, focus_input, chat_id)
+function Insightful:openChat(selection, quick_action, chat_id)
     local book = self.storage:getBook(self.ui)
     local conversation, load_err = self.storage:load(book, chat_id)
     if not conversation then
@@ -250,29 +263,29 @@ function Insightful:openChat(selection, quick_action, focus_input, chat_id)
         return
     end
     if load_err then logger.warn("Insightful: conversation load warning:", load_err) end
-    self:_openConversation(conversation, selection, quick_action, focus_input)
+    self:_openConversation(conversation, selection, quick_action)
 end
 
-function Insightful:startNewChat(selection, quick_action, focus_input)
+function Insightful:startNewChat(selection, quick_action)
     local book = self.storage:getBook(self.ui)
     local conversation, create_err = self.storage:create(book)
     if not conversation then
         self:_showStorageError(_("A new chat could not be started."), create_err)
         return
     end
-    self:_openConversation(conversation, selection, quick_action, focus_input)
+    self:_openConversation(conversation, selection, quick_action)
 end
 
-function Insightful:openFromHighlight(selection, quick_action, focus_input)
+function Insightful:openFromHighlight(selection, quick_action)
     local book = self.storage:getBook(self.ui)
     local enabled, setting_err = self.storage:getNewChatOnSend(book)
     if setting_err then
         logger.warn("Insightful: highlighted-action chat setting could not be read:", setting_err)
     end
     if enabled then
-        return self:startNewChat(selection, quick_action, focus_input)
+        return self:startNewChat(selection, quick_action)
     end
-    return self:openChat(selection, quick_action, focus_input)
+    return self:openChat(selection, quick_action)
 end
 
 function Insightful:showChatList()
@@ -281,8 +294,8 @@ function Insightful:showChatList()
     return ChatList.show{
         storage = self.storage,
         book = book,
-        on_new = function() self:startNewChat(nil, nil, true) end,
-        on_open = function(chat_id) self:openChat(nil, nil, true, chat_id) end,
+        on_new = function() self:startNewChat() end,
+        on_open = function(chat_id) self:openChat(nil, nil, chat_id) end,
     }
 end
 
@@ -293,23 +306,23 @@ end
 
 function Insightful:showHighlightActions(selection)
     local action_dialog
-    local function choose(action, focus_input)
+    local function choose(action)
         UIManager:close(action_dialog)
-        UIManager:nextTick(function() self:openFromHighlight(selection, action, focus_input) end)
+        UIManager:nextTick(function() self:openFromHighlight(selection, action) end)
     end
     action_dialog = ButtonDialog:new{
-        title = _("AI"),
+        title = _("Insightful actions"),
         buttons = {
             {
-                { text = _("Explain"), callback = function() choose("explain", false) end },
-                { text = _("Explain terms"), callback = function() choose("explain_terms", false) end },
+                { text = _("Explain"), callback = function() choose("explain") end },
+                { text = _("Explain terms"), callback = function() choose("explain_terms") end },
             },
             {
-                { text = _("Context / history"), callback = function() choose("context_history", false) end },
-                { text = _("People / characters"), callback = function() choose("people_characters", false) end },
+                { text = _("Context / history"), callback = function() choose("context_history") end },
+                { text = _("People / characters"), callback = function() choose("people_characters") end },
             },
             {
-                { text = _("Ask AI…"), callback = function() choose(nil, true) end },
+                { text = _("Ask AI…"), callback = function() choose() end },
             },
         },
     }
@@ -324,7 +337,7 @@ function Insightful:addToMainMenu(menu_items)
         sub_item_table = {
             {
                 text = _("Continue current chat"),
-                callback = function() self:openChat(nil, nil, true) end,
+                callback = function() self:openChat() end,
             },
             {
                 text = _("Chats"),
@@ -332,11 +345,16 @@ function Insightful:addToMainMenu(menu_items)
             },
             {
                 text = _("Start new chat"),
-                callback = function() self:startNewChat(nil, nil, true) end,
+                callback = function() self:startNewChat() end,
                 separator = true,
             },
             {
-                text = _("New chat for highlighted actions"),
+                text_func = function()
+                    local text = _("New chat for highlighted actions")
+                    local enabled = self.storage:getNewChatOnSend(book)
+                    local default_enabled = G_reader_settings:isTrue(NEW_CHAT_ON_HIGHLIGHT_DEFAULT)
+                    return enabled == default_enabled and (text .. "   ★") or text
+                end,
                 checked_func = function()
                     return self.storage:getNewChatOnSend(book)
                 end,
@@ -348,8 +366,20 @@ function Insightful:addToMainMenu(menu_items)
                     end
                     if touchmenu_instance then touchmenu_instance:updateItems() end
                 end,
+                hold_callback = function(touchmenu_instance)
+                    local enabled = self.storage:getNewChatOnSend(book)
+                    UIManager:show(ConfirmBox:new{
+                        text = enabled
+                            and _("Use a new chat for highlighted actions by default in other books?")
+                            or _("Continue the current chat for highlighted actions by default in other books?"),
+                        ok_callback = function()
+                            G_reader_settings:saveSetting(NEW_CHAT_ON_HIGHLIGHT_DEFAULT, enabled)
+                            if touchmenu_instance then touchmenu_instance:updateItems() end
+                        end,
+                    })
+                end,
                 keep_menu_open = true,
-                help_text = _("When this is on, each button chosen for a highlighted passage starts a separate chat. Later messages continue that chat."),
+                help_text = _("Tap to change this book. Hold to use its current value as the default for other books."),
             },
             {
                 text = _("Statistics"),
@@ -383,7 +413,11 @@ function Insightful:addToMainMenu(menu_items)
 end
 
 function Insightful:onClose()
-    if self.active_chat then self.active_chat:close() end
+    local active_chat = self.active_chat
+    local running_chat = self.running_chat
+    if active_chat then active_chat:close() end
+    if running_chat then running_chat:shutdown() end
+    self.running_chat = nil
 end
 
 Insightful.onCloseWidget = Insightful.onClose
