@@ -376,7 +376,7 @@ function ConversationViewer:update(messages, stream_text, status, busy, refresh_
     self.send_button:enableDisable(not self.busy)
     self:_resizeLayout(self.available_height or self.height, false, page_number)
     if refresh_region then
-        UIManager:setDirty(self, "partial", refresh_region)
+        UIManager:setDirty(self, "ui", refresh_region)
     else
         UIManager:setDirty(self, "ui")
     end
