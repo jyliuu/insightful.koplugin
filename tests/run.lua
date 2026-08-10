@@ -734,6 +734,30 @@ test("multiple chats stay isolated by book and persist all fields", function()
     same(storage:load(book_a).id, second.id, "remaining chat becomes active")
 end)
 
+test("highlighted-action chat setting supports a global default and per-book overrides", function()
+    local global_default = false
+    local factory = memorySettingsFactory()
+    local storage = Storage:new{
+        root = "/virtual/insightful/conversations",
+        settings_factory = factory,
+        make_path = function() end,
+        new_chat_on_send_default = function() return global_default end,
+    }
+    local book_a = storage:getBook(fakeUI("global-a", "/books/global-a.epub", "Global A"))
+    local book_b = storage:getBook(fakeUI("global-b", "/books/global-b.epub", "Global B"))
+
+    same(storage:getNewChatOnSend(book_a), false, "Book A starts with the global default")
+    truthy(storage:load(book_b), "Book B persists its untouched book state")
+    same(storage:getNewChatOnSend(book_b), false, "Book B starts with the global default")
+    truthy(storage:setNewChatOnSend(book_a, true), "Book A saves an override")
+    global_default = true
+    same(storage:getNewChatOnSend(book_a), true, "Book A keeps its matching override")
+    same(storage:getNewChatOnSend(book_b), true, "Book B inherits the changed global default")
+
+    truthy(storage:setNewChatOnSend(book_b, false), "Book B saves a different override")
+    same(storage:getNewChatOnSend(book_b), false, "Book B override wins over the global default")
+end)
+
 test("version 1 conversation migrates into the first chat", function()
     local factory, files = memorySettingsFactory()
     local storage = Storage:new{
@@ -1219,7 +1243,11 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     contains(main_source, 'Dispatcher:registerAction("insightful_show_chats"', "chat list gesture action")
     contains(main_source, 'moveMenuItemToFront("tools", self.name)', "Insightful menu is first in Tools")
     contains(main_source, 'sorting_hint = "tools"', "Insightful menu is placed in Tools")
-    contains(main_source, 'text = _("New chat for highlighted actions")', "highlighted-action new-chat toggle")
+    contains(main_source, 'local NEW_CHAT_ON_HIGHLIGHT_DEFAULT = "insightful_new_chat_on_highlight_default"', "highlighted-action global default key")
+    contains(main_source, 'local text = _("New chat for highlighted actions")', "highlighted-action new-chat toggle")
+    contains(main_source, "hold_callback = function(touchmenu_instance)", "highlighted-action setting supports hold")
+    contains(main_source, "G_reader_settings:saveSetting(NEW_CHAT_ON_HIGHLIGHT_DEFAULT, enabled)", "hold saves the global default")
+    contains(main_source, 'text .. "   ★"', "highlighted-action setting marks the global default")
     contains(main_source, 'title = _("Insightful actions")', "highlight action dialog title")
     truthy(not main_source:find('title = _("AI")', 1, true), "generic AI dialog title removed")
     contains(main_source, 'text = _("Statistics")', "statistics menu")

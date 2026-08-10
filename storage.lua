@@ -110,11 +110,13 @@ function Storage:new(options)
     instance.settings_factory = options.settings_factory
     instance.make_path = options.make_path
     instance.partial_md5 = options.partial_md5
+    instance.new_chat_on_send_default = options.new_chat_on_send_default
     instance.now = options.now or os.time
     return instance
 end
 
-function Storage.forUI(ui)
+function Storage.forUI(ui, options)
+    options = options or {}
     local DataStorage = require("datastorage")
     local LuaSettings = require("luasettings")
     local util = require("util")
@@ -124,8 +126,15 @@ function Storage.forUI(ui)
         settings_factory = function(path) return LuaSettings:open(path) end,
         make_path = util.makePath,
         partial_md5 = util.partialMD5,
+        new_chat_on_send_default = options.new_chat_on_send_default,
         ui = ui,
     }
+end
+
+function Storage:_newChatOnSendDefault()
+    if type(self.new_chat_on_send_default) ~= "function" then return false end
+    local ok, enabled = pcall(self.new_chat_on_send_default)
+    return ok and enabled == true
 end
 
 function Storage:getBook(ui)
@@ -172,7 +181,8 @@ function Storage:newBookState(book)
         book = copyTable(book),
         next_chat_number = 1,
         active_chat_id = nil,
-        new_chat_on_send = false,
+        new_chat_on_send = self:_newChatOnSendDefault(),
+        new_chat_on_send_override = false,
         chats = {},
     }
 end
@@ -249,6 +259,14 @@ function Storage:_normaliseState(data, book)
     state.next_chat_number = math.max(1, tonumber(state.next_chat_number) or 1)
     state.active_chat_id = cleanId(state.active_chat_id)
     state.new_chat_on_send = state.new_chat_on_send == true
+    local setting_migrated = data.new_chat_on_send_override == nil
+    if setting_migrated then
+        -- Before global defaults existed, true meant the user had enabled the
+        -- per-book setting. False was also the untouched initial value.
+        state.new_chat_on_send_override = state.new_chat_on_send
+    else
+        state.new_chat_on_send_override = data.new_chat_on_send_override == true
+    end
     state.chats = {}
     local seen = {}
     for index, stored in ipairs(data.chats) do
@@ -261,7 +279,7 @@ function Storage:_normaliseState(data, book)
     if state.active_chat_id and not seen[state.active_chat_id] then
         state.active_chat_id = nil
     end
-    return state, false
+    return state, setting_migrated
 end
 
 function Storage:_open(path, create_root)
@@ -422,6 +440,9 @@ end
 function Storage:getNewChatOnSend(book)
     local state, _, err = self:_loadState(book, true)
     if not state then return false, err end
+    if not state.new_chat_on_send_override then
+        return self:_newChatOnSendDefault()
+    end
     return state.new_chat_on_send == true
 end
 
@@ -429,6 +450,7 @@ function Storage:setNewChatOnSend(book, enabled)
     local state, settings, err = self:_loadState(book, true)
     if not state then return nil, err end
     state.new_chat_on_send = enabled == true
+    state.new_chat_on_send_override = true
     return self:_flush(settings, state)
 end
 

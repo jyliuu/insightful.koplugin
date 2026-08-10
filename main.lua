@@ -1,4 +1,5 @@
 local ButtonDialog = require("ui/widget/buttondialog")
+local ConfirmBox = require("ui/widget/confirmbox")
 local Dispatcher = require("dispatcher")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
@@ -9,6 +10,7 @@ local _ = require("gettext")
 
 local source = debug.getinfo(1, "S").source
 local PLUGIN_DIR = source:match("^@(.*/)") or ""
+local NEW_CHAT_ON_HIGHLIGHT_DEFAULT = "insightful_new_chat_on_highlight_default"
 
 local function localRequire(name)
     local key = "insightful." .. name
@@ -63,7 +65,11 @@ end
 
 function Insightful:init()
     self.configuration = loadConfiguration()
-    self.storage = Storage.forUI(self.ui)
+    self.storage = Storage.forUI(self.ui, {
+        new_chat_on_send_default = function()
+            return G_reader_settings:isTrue(NEW_CHAT_ON_HIGHLIGHT_DEFAULT)
+        end,
+    })
     self.stats = Stats.forUI()
     self:onDispatcherRegisterActions()
     moveMenuItemToFront("tools", self.name)
@@ -344,7 +350,12 @@ function Insightful:addToMainMenu(menu_items)
                 separator = true,
             },
             {
-                text = _("New chat for highlighted actions"),
+                text_func = function()
+                    local text = _("New chat for highlighted actions")
+                    local enabled = self.storage:getNewChatOnSend(book)
+                    local default_enabled = G_reader_settings:isTrue(NEW_CHAT_ON_HIGHLIGHT_DEFAULT)
+                    return enabled == default_enabled and (text .. "   ★") or text
+                end,
                 checked_func = function()
                     return self.storage:getNewChatOnSend(book)
                 end,
@@ -356,8 +367,20 @@ function Insightful:addToMainMenu(menu_items)
                     end
                     if touchmenu_instance then touchmenu_instance:updateItems() end
                 end,
+                hold_callback = function(touchmenu_instance)
+                    local enabled = self.storage:getNewChatOnSend(book)
+                    UIManager:show(ConfirmBox:new{
+                        text = enabled
+                            and _("Use a new chat for highlighted actions by default in other books?")
+                            or _("Continue the current chat for highlighted actions by default in other books?"),
+                        ok_callback = function()
+                            G_reader_settings:saveSetting(NEW_CHAT_ON_HIGHLIGHT_DEFAULT, enabled)
+                            if touchmenu_instance then touchmenu_instance:updateItems() end
+                        end,
+                    })
+                end,
                 keep_menu_open = true,
-                help_text = _("When this is on, each button chosen for a highlighted passage starts a separate chat. Later messages continue that chat."),
+                help_text = _("Tap to change this book. Hold to use its current value as the default for other books."),
             },
             {
                 text = _("Statistics"),
