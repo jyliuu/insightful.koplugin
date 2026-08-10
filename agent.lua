@@ -156,6 +156,35 @@ local function safeToolResult(book_tools, call)
     return result
 end
 
+local function emptyUsage()
+    return {
+        requests = 0,
+        measured_requests = 0,
+        costed_requests = 0,
+        input_tokens = 0,
+        output_tokens = 0,
+        total_tokens = 0,
+        cost_usd = 0,
+    }
+end
+
+local function addResponseUsage(total, usage)
+    total.requests = total.requests + 1
+    if type(usage) ~= "table" then return end
+    if tonumber(usage.input_tokens) or tonumber(usage.output_tokens) or tonumber(usage.total_tokens) then
+        total.measured_requests = total.measured_requests + 1
+    end
+    for _, key in ipairs({ "input_tokens", "output_tokens", "total_tokens" }) do
+        local value = tonumber(usage[key])
+        if value and value > 0 then total[key] = total[key] + math.floor(value) end
+    end
+    local cost_usd = tonumber(usage.cost_usd)
+    if cost_usd then
+        total.costed_requests = total.costed_requests + 1
+        total.cost_usd = total.cost_usd + math.max(0, cost_usd)
+    end
+end
+
 function Agent.run(conversation, options)
     options = options or {}
     local provider = assert(options.provider, "provider is required")
@@ -163,22 +192,25 @@ function Agent.run(conversation, options)
     local messages = Agent.buildMessages(conversation)
     local tool_turns, tool_calls = 0, 0
     local trace = {}
+    local usage = emptyUsage()
 
     while true do
         if type(options.on_stream_start) == "function" then
             pcall(options.on_stream_start)
         end
-        local ok, response, provider_err = pcall(provider.chat, provider, {
+        local ok, response, provider_err, provider_usage = pcall(provider.chat, provider, {
             system = Agent.systemPrompt(conversation.book, options.position),
             messages = messages,
             tools = Agent.tool_schemas,
         }, options.on_delta, options.stream_control, options.on_stream_activity, options.on_tool_delta)
         if not ok then
-            return nil, "Couldn't reach the AI service: " .. tostring(response)
+            return nil, "Couldn't reach the AI service: " .. tostring(response), nil, usage
         end
         if not response then
-            return nil, provider_err or "The AI service returned no response."
+            if type(provider_usage) == "table" then addResponseUsage(usage, provider_usage) end
+            return nil, provider_err or "The AI service returned no response.", nil, usage
         end
+        addResponseUsage(usage, response.usage)
         local calls = type(response.tool_calls) == "table" and response.tool_calls or {}
         if #calls == 0 then
             if type(response.text) == "string" and trim(response.text) ~= "" then
@@ -186,9 +218,9 @@ function Agent.run(conversation, options)
                     tool_turns = tool_turns,
                     tool_calls = tool_calls,
                     trace = trace,
-                }
+                }, usage
             end
-            return nil, "The AI service returned neither text nor tool calls."
+            return nil, "The AI service returned neither text nor tool calls.", nil, usage
         end
 
         if type(options.on_tools) == "function" then

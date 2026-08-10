@@ -35,6 +35,7 @@ local ProviderRegistry = localRequire("provider_registry"):new{
     },
 }
 local Storage = localRequire("storage")
+local Stats = localRequire("stats")
 local Streaming = localRequire("streaming")
 
 local Insightful = WidgetContainer:extend{
@@ -53,6 +54,7 @@ end
 function Insightful:init()
     self.configuration = loadConfiguration()
     self.storage = Storage.forUI(self.ui)
+    self.stats = Stats.forUI()
     self:onDispatcherRegisterActions()
     if self.ui.menu then self.ui.menu:registerToMainMenu(self) end
     if self.ui.highlight then
@@ -123,6 +125,7 @@ function Insightful:_openConversation(conversation, selection, quick_action, foc
         book_tools_class = BookTools,
         provider_registry = ProviderRegistry,
         storage = self.storage,
+        stats = self.stats,
         streaming = Streaming,
         conversation = conversation,
         configuration = self.configuration,
@@ -135,6 +138,97 @@ function Insightful:_openConversation(conversation, selection, quick_action, foc
     }
     self.active_chat = chat
     chat:show(focus_input, quick_action)
+end
+
+local function formatCount(value)
+    local digits = tostring(math.max(0, math.floor(tonumber(value) or 0)))
+    local formatted = digits:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    return formatted:gsub("^,", "")
+end
+
+local function formatCost(value)
+    return string.format("$%.8f", math.max(0, tonumber(value) or 0))
+end
+
+local function statisticsText(title, totals)
+    totals = type(totals) == "table" and totals or {}
+    local missing = math.max(0,
+        (tonumber(totals.requests) or 0) - (tonumber(totals.measured_requests) or 0))
+    local missing_cost = math.max(0,
+        (tonumber(totals.requests) or 0) - (tonumber(totals.costed_requests) or 0))
+    local lines = {
+        title,
+        "",
+        _("Model requests: ") .. formatCount(totals.requests),
+        _("Input tokens: ") .. formatCount(totals.input_tokens),
+        _("Output tokens: ") .. formatCount(totals.output_tokens),
+        _("Total tokens: ") .. formatCount(totals.total_tokens),
+    }
+    if (tonumber(totals.costed_requests) or 0) > 0 then
+        table.insert(lines, _("Provider reported cost: ") .. formatCost(totals.cost_usd))
+    else
+        table.insert(lines, _("Provider reported cost: Not available"))
+    end
+    if missing > 0 then
+        table.insert(lines, "")
+        table.insert(lines, _("Requests without token counts: ") .. formatCount(missing))
+    end
+    if missing_cost > 0 and (tonumber(totals.costed_requests) or 0) > 0 then
+        table.insert(lines, _("Requests without reported cost: ") .. formatCount(missing_cost))
+    end
+    return table.concat(lines, "\n")
+end
+
+local PROVIDER_NAMES = {
+    anthropic = "Anthropic",
+    deepseek = "DeepSeek",
+    openai = "OpenAI",
+    openrouter = "OpenRouter",
+}
+
+function Insightful:showGeneralStatistics()
+    local provider_id = ProviderRegistry:providerId(self.configuration)
+    local parameters = type(self.configuration.parameters) == "table"
+        and self.configuration.parameters or {}
+    local model = tostring(parameters.model or self.configuration.model or "")
+    if model == "" then model = _("Not set") end
+    local output_limit = tonumber(parameters.max_completion_tokens or parameters.max_tokens
+        or self.configuration.max_completion_tokens or self.configuration.max_tokens)
+    if not output_limit and provider_id == "anthropic" then output_limit = 8192 end
+    local output_limit_text = output_limit and formatCount(output_limit) or _("Provider default")
+    UIManager:show(InfoMessage:new{
+        text = table.concat({
+            _("General"),
+            "",
+            _("Provider: ") .. tostring(PROVIDER_NAMES[provider_id] or provider_id),
+            _("Configured model: ") .. model,
+            _("Streaming: ") .. (self.configuration.stream == false and _("Off") or _("On")),
+            _("Output token limit: ") .. output_limit_text,
+        }, "\n"),
+        show_icon = false,
+    })
+end
+
+function Insightful:_showStatistics(title, totals, err)
+    if not totals then
+        self:_showStorageError(_("The statistics could not be opened."), err)
+        return
+    end
+    UIManager:show(InfoMessage:new{
+        text = statisticsText(title, totals),
+        show_icon = false,
+    })
+end
+
+function Insightful:showBookStatistics()
+    local book = self.storage:getBook(self.ui)
+    local totals, err = self.stats:getBook(book)
+    self:_showStatistics(_("Current book") .. "\n" .. tostring(book.title), totals, err)
+end
+
+function Insightful:showGlobalStatistics()
+    local totals, err = self.stats:getGlobal()
+    self:_showStatistics(_("All books"), totals, err)
 end
 
 function Insightful:openChat(selection, quick_action, focus_input, chat_id)
@@ -245,6 +339,24 @@ function Insightful:addToMainMenu(menu_items)
                 end,
                 keep_menu_open = true,
                 help_text = _("When this is on, each button chosen for a highlighted passage starts a separate chat. Later messages continue that chat."),
+            },
+            {
+                text = _("Statistics"),
+                sub_item_table = {
+                    {
+                        text = _("General"),
+                        callback = function() self:showGeneralStatistics() end,
+                    },
+                    {
+                        text = _("Current book"),
+                        callback = function() self:showBookStatistics() end,
+                    },
+                    {
+                        text = _("All books"),
+                        callback = function() self:showGlobalStatistics() end,
+                    },
+                },
+                separator = true,
             },
             {
                 text = _("Gesture shortcut"),

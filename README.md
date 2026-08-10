@@ -44,7 +44,7 @@ Insightful works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not b
 3. Add your provider, endpoint, model, and API key to `configuration.lua`.
 4. Restart KOReader and open a book.
 
-You should now see **Insightful** in the reader menu. Its submenu lets you continue the current chat, open the chat list, or start a new chat. Select some text and **AI** should also appear in the highlight menu.
+You should now see **Insightful** in the reader menu. Its submenu lets you continue the current chat, open the chat list, start a new chat, or view token use. Select some text and **AI** should also appear in the highlight menu.
 
 `configuration.lua` contains your API key, so keep it private. Git already ignores it.
 
@@ -86,6 +86,16 @@ Open **Insightful** from the reader menu when you want to manage chats for the c
 
 Turn on **New chat for highlighted actions** when each button chosen from the highlighted passage menu should start a separate chat. This includes **Ask AI…**. Once the chat is open, later messages continue that chat. The setting applies only to the current book.
 
+## Check token use
+
+Open **Insightful**, then **Statistics**, from the reader menu. **General** shows the current provider, model, streaming mode, and output limit. **Current book** shows model requests and token use for the open book. **All books** shows the combined totals for every book.
+
+Insightful uses the token counts returned by the provider. The totals include each model request made while answering, including requests made after a book tool runs. If a provider response has no token counts, the statistics screen shows how many requests are missing counts.
+
+When the provider reports a request cost in US dollars, Insightful adds it to the current book and all books totals. OpenRouter returns this cost. The other supported providers normally return token counts without a request cost, so Insightful shows the cost as unavailable. Insightful does not estimate cost from a saved price table.
+
+Counts begin after you install a version that includes statistics. Insightful does not estimate token use for older saved chats.
+
 ## Open the chat list with a gesture
 
 Insightful adds an action named **Insightful: show chats** to KOReader's gesture manager. Open **Taps and gestures**, then **Gesture manager**, and assign the action to a corner hold, a swipe, or a multiswipe. The assigned gesture opens the chat list for the current book without selecting text.
@@ -122,6 +132,12 @@ Insightful saves all chats for a book in one file in KOReader's settings directo
 
 ```text
 insightful/conversations/<book-id>.lua
+```
+
+Token totals are stored separately as aggregate numbers.
+
+```text
+insightful/statistics.lua
 ```
 
 KOReader's stored partial checksum is normally used as the book ID. Insightful saves each chat's questions and model replies, along with the current chat and the setting for starting a new chat from highlighted actions. The first test build with multiple chats moves an existing conversation into the first chat for its book. Text fetched by a book function is kept only for the active request and is not copied into the conversation file.

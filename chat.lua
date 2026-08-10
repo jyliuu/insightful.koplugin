@@ -56,6 +56,7 @@ function Chat:new(options)
     instance.book_tools_class = assert(options.book_tools_class)
     instance.provider_registry = assert(options.provider_registry)
     instance.storage = assert(options.storage)
+    instance.stats = assert(options.stats)
     instance.viewer_class = assert(options.answer_viewer_class)
     instance.streaming = assert(options.streaming)
     instance.conversation = assert(options.conversation)
@@ -268,7 +269,7 @@ function Chat:_send(question, selection, display_content)
         self:_updateViewer()
         return
     end
-    local answer, err, provenance = self.agent.run(self.conversation, {
+    local answer, err, provenance, usage = self.agent.run(self.conversation, {
         provider = provider,
         book_tools = book_tools,
         position = position,
@@ -288,6 +289,8 @@ function Chat:_send(question, selection, display_content)
         on_tool_start = function(call) self:_toolStart(call) end,
         on_tool_finish = function(call) self:_toolFinish(call) end,
     })
+    local stats_saved, stats_err = self.stats:record(self.conversation.book, usage)
+    if not stats_saved then logger.warn("Insightful: statistics save failed:", stats_err) end
     if self.stream_flush_task then
         UIManager:unschedule(self.stream_flush_task)
         self:_flushStream()

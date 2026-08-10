@@ -14,6 +14,7 @@ local ProviderRegistry = dofile(root .. "/provider_registry.lua"):new{
     },
 }
 local Storage = dofile(root .. "/storage.lua")
+local Stats = dofile(root .. "/stats.lua")
 local Streaming = dofile(root .. "/streaming.lua")
 
 local function loadChatController()
@@ -177,6 +178,62 @@ test("multiple tool calls execute before the next provider turn", function()
     same(#names, 2, "executed calls")
 end)
 
+test("agent adds token use across tool-call requests", function()
+    local provider = scriptedProvider({
+        {
+            tool_calls = {{ id = "a", name = "toc", arguments = {} }},
+            usage = { input_tokens = 100, output_tokens = 20, total_tokens = 120 },
+        },
+        {
+            text = "Finished.",
+            usage = {
+                input_tokens = 150,
+                output_tokens = 30,
+                total_tokens = 180,
+                cost_usd = 0.0015,
+            },
+        },
+    })
+    local answer, err, _, usage = Agent.run(conversation(), {
+        provider = provider,
+        book_tools = { execute = function() return { ok = true } end },
+    })
+    same(err, nil, "agent error")
+    same(answer, "Finished.", "answer")
+    same(usage.requests, 2, "model requests")
+    same(usage.measured_requests, 2, "measured model requests")
+    same(usage.input_tokens, 250, "input tokens")
+    same(usage.output_tokens, 50, "output tokens")
+    same(usage.total_tokens, 300, "total tokens")
+    same(usage.costed_requests, 1, "costed model requests")
+    same(usage.cost_usd, 0.0015, "reported cost")
+end)
+
+test("agent keeps reported token use when a later request fails", function()
+    local provider = scriptedProvider({
+        {
+            tool_calls = {{ id = "a", name = "toc", arguments = {} }},
+            usage = { input_tokens = 100, output_tokens = 20, total_tokens = 120 },
+        },
+        function()
+            return nil, "The AI service stopped because its output limit was reached.", {
+                input_tokens = 150,
+                output_tokens = 30,
+                total_tokens = 180,
+            }
+        end,
+    })
+    local answer, err, _, usage = Agent.run(conversation(), {
+        provider = provider,
+        book_tools = { execute = function() return { ok = true } end },
+    })
+    same(answer, nil, "failed answer")
+    contains(err, "output limit", "provider error")
+    same(usage.requests, 2, "completed model requests")
+    same(usage.measured_requests, 2, "measured failed request")
+    same(usage.total_tokens, 300, "failed request token total")
+end)
+
 test("malformed provider response is controlled", function()
     local answer, err = Agent.run(conversation(), {
         provider = scriptedProvider({ { unexpected = true } }),
@@ -213,6 +270,7 @@ test("DeepSeek adapter returns neutral tool calls and preserves reasoning state"
         decode = function(text)
             if text == "provider-response" then
                 return {
+                    usage = { prompt_tokens = 40, completion_tokens = 8, total_tokens = 48 },
                     choices = {{
                         message = {
                             content = nil,
@@ -250,6 +308,9 @@ test("DeepSeek adapter returns neutral tool calls and preserves reasoning state"
     same(response.tool_calls[1].name, "search_book", "neutral tool name")
     same(response.tool_calls[1].arguments.query, "Mentor", "decoded tool arguments")
     same(response.provider_state.reasoning_content, "Use the book search tool.", "provider reasoning state")
+    same(response.usage.input_tokens, 40, "provider input tokens")
+    same(response.usage.output_tokens, 8, "provider output tokens")
+    same(response.usage.total_tokens, 48, "provider total tokens")
     same(captured.url, "https://example.test/v1/chat/completions", "request URL")
     same(captured.body, "encoded-request", "encoded body")
     same(encoded_body.max_tokens, nil, "default request has no output-token cap")
@@ -265,7 +326,15 @@ test("OpenAI and OpenRouter adapters use their own token field", function()
         encode = function(value) encoded_body = value; return "request" end,
         decode = function(value)
             if value == "response" then
-                return { choices = {{ finish_reason = "stop", message = { content = "Done." } }} }
+                return {
+                    choices = {{ finish_reason = "stop", message = { content = "Done." } }},
+                    usage = {
+                        prompt_tokens = 25,
+                        completion_tokens = 10,
+                        total_tokens = 35,
+                        cost = 0.0007,
+                    },
+                }
             end
             error("unexpected JSON: " .. tostring(value))
         end,
@@ -282,8 +351,14 @@ test("OpenAI and OpenRouter adapters use their own token field", function()
         local response, err = provider:chat{ system = "system", messages = {}, tools = {} }
         same(err, nil, provider_id .. " error")
         same(response.text, "Done.", provider_id .. " text")
+        same(response.usage.total_tokens, 35, provider_id .. " token use")
         same(encoded_body.max_completion_tokens, 2500, provider_id .. " token field")
         same(encoded_body.max_tokens, nil, provider_id .. " legacy token field absent")
+        if provider_id == "openrouter" then
+            same(response.usage.cost_usd, 0.0007, "OpenRouter reported cost")
+        else
+            same(response.usage.cost_usd, nil, "OpenAI has no response cost")
+        end
     end
     package.loaded.json = previous_json
 end)
@@ -292,6 +367,15 @@ test("Anthropic adapter uses Messages headers, body, stream, and tool blocks", f
     local previous_json = package.loaded.json
     local encoded_body
     local decoded = {
+        start = {
+            type = "message_start",
+            message = { usage = {
+                input_tokens = 90,
+                cache_creation_input_tokens = 10,
+                cache_read_input_tokens = 20,
+                output_tokens = 1,
+            } },
+        },
         tool = {
             type = "content_block_start",
             index = 0,
@@ -302,7 +386,11 @@ test("Anthropic adapter uses Messages headers, body, stream, and tool blocks", f
             index = 0,
             delta = { type = "input_json_delta", partial_json = "{}" },
         },
-        stop = { type = "message_delta", delta = { stop_reason = "tool_use" } },
+        stop = {
+            type = "message_delta",
+            delta = { stop_reason = "tool_use" },
+            usage = { output_tokens = 9 },
+        },
     }
     package.loaded.json = {
         encode = function(value) encoded_body = value; return "anthropic-request" end,
@@ -321,7 +409,7 @@ test("Anthropic adapter uses Messages headers, body, stream, and tool blocks", f
     }, function() error("blocking transport should not run") end, function(_, headers, body, _, _, on_chunk)
         captured_headers = headers
         same(body, "anthropic-request", "Anthropic request body")
-        on_chunk("event: content_block_start\ndata: tool\n\n")
+        on_chunk("event: message_start\ndata: start\n\nevent: content_block_start\ndata: tool\n\n")
         on_chunk("event: content_block_delta\ndata: args\n\nevent: message_delta\ndata: stop\n\n")
         return true, 200, "", "OK"
     end)
@@ -333,6 +421,9 @@ test("Anthropic adapter uses Messages headers, body, stream, and tool blocks", f
     package.loaded.json = previous_json
     same(err, nil, "Anthropic stream error")
     same(response.tool_calls[1].name, "toc", "Anthropic neutral tool name")
+    same(response.usage.input_tokens, 120, "Anthropic input tokens include cache use")
+    same(response.usage.output_tokens, 9, "Anthropic output tokens")
+    same(response.usage.total_tokens, 129, "Anthropic total tokens")
     same(captured_headers["x-api-key"], "secret", "Anthropic API key header")
     same(captured_headers["anthropic-version"], "2023-06-01", "Anthropic version header")
     same(captured_headers.Authorization, nil, "Anthropic bearer header absent")
@@ -380,14 +471,18 @@ end)
 test("stream output-limit stop is not accepted as a complete answer", function()
     local decoded = {
         text = { choices = {{ delta = { content = "Partial answer" } }} },
-        limit = { choices = {{ delta = {}, finish_reason = "length" }} },
+        limit = {
+            choices = {{ delta = {}, finish_reason = "length" }},
+            usage = { prompt_tokens = 50, completion_tokens = 10, total_tokens = 60 },
+        },
     }
     local provider = ProviderRegistry:newProvider({ provider = "deepseek", api_key = "x", base_url = "x", model = "x" }, function() end)
     local accumulator = provider:_newStreamAccumulator({ decode = function(value) return assert(decoded[value]) end })
     truthy(accumulator:feed("data: text\n\ndata: limit\n\ndata: [DONE]\n\n"), "limited stream feed")
-    local response, err = accumulator:finish()
+    local response, err, usage = accumulator:finish()
     same(response, nil, "limited stream response")
     contains(err, "output limit", "limited stream error")
+    same(usage.total_tokens, 60, "limited stream token use")
 end)
 
 test("SSE accumulator rebuilds fragmented native tool calls", function()
@@ -433,6 +528,10 @@ test("provider requests SSE and emits text deltas", function()
         decode = function(value)
             if value == "one" then return { choices = {{ delta = { content = "Live " } }} } end
             if value == "two" then return { choices = {{ delta = { content = "answer" } }} } end
+            if value == "usage" then return {
+                choices = {},
+                usage = { prompt_tokens = 70, completion_tokens = 12, total_tokens = 82 },
+            } end
             error("unexpected JSON: " .. tostring(value))
         end,
     }
@@ -448,7 +547,7 @@ test("provider requests SSE and emits text deltas", function()
         request_headers = headers
         same(body, "encoded-stream-request", "stream request body")
         on_chunk("data: one\n\nda")
-        on_chunk("ta: two\n\ndata: [DONE]\n\n")
+        on_chunk("ta: two\n\ndata: usage\n\ndata: [DONE]\n\n")
         return true, 200, "", "OK"
     end)
     local deltas = {}
@@ -462,9 +561,13 @@ test("provider requests SSE and emits text deltas", function()
     same(response.text, "Live answer", "stream provider text")
     same(table.concat(deltas), "Live answer", "stream provider deltas")
     same(encoded_body.stream, true, "stream request flag")
+    same(encoded_body.stream_options.include_usage, true, "stream usage request flag")
     same(encoded_body.max_tokens, 2400, "configured output-token cap")
     same(encoded_body.temperature, 0.2, "configured temperature override")
     same(request_headers.Accept, "text/event-stream", "stream accept header")
+    same(response.usage.input_tokens, 70, "stream input tokens")
+    same(response.usage.output_tokens, 12, "stream output tokens")
+    same(response.usage.total_tokens, 82, "stream total tokens")
 end)
 
 test("agent reports stream turns and book lookup phase", function()
@@ -525,6 +628,50 @@ local function memorySettingsFactory()
     end
     return factory, files
 end
+
+test("statistics keep current-book and all-book token totals", function()
+    local factory, files = memorySettingsFactory()
+    local stats = Stats:new{
+        path = "/virtual/insightful/statistics.lua",
+        directory = "/virtual/insightful",
+        settings_factory = factory,
+        make_path = function() end,
+    }
+    local book_a = { id = "book-a", title = "Book A", authors = "Author A" }
+    local book_b = { id = "book-b", title = "Book B", authors = "Author B" }
+    truthy(stats:record(book_a, {
+        requests = 2,
+        measured_requests = 2,
+        costed_requests = 2,
+        input_tokens = 250,
+        output_tokens = 50,
+        total_tokens = 300,
+        cost_usd = 0.0012,
+    }), "record Book A")
+    truthy(stats:record(book_b, {
+        requests = 2,
+        measured_requests = 1,
+        input_tokens = 80,
+        output_tokens = 20,
+        total_tokens = 100,
+    }), "record Book B")
+
+    local current = stats:getBook(book_a)
+    same(current.requests, 2, "Book A requests")
+    same(current.input_tokens, 250, "Book A input tokens")
+    same(current.output_tokens, 50, "Book A output tokens")
+    same(current.total_tokens, 300, "Book A total tokens")
+
+    local global = stats:getGlobal()
+    same(global.requests, 4, "all-book requests")
+    same(global.measured_requests, 3, "all-book measured requests")
+    same(global.costed_requests, 2, "all-book costed requests")
+    same(global.input_tokens, 330, "all-book input tokens")
+    same(global.output_tokens, 70, "all-book output tokens")
+    same(global.total_tokens, 400, "all-book total tokens")
+    same(global.cost_usd, 0.0012, "all-book reported cost")
+    same(files[stats.path].version, Stats.VERSION, "statistics version")
+end)
 
 local function fakeUI(id, path, title)
     return {
@@ -626,6 +773,7 @@ test("sending inside an existing chat never creates another chat", function()
         messages = {{ role = "user", content = "Earlier question" }},
     }
     local create_count = 0
+    local recorded_usage
     local storage = {
         getNewChatOnSend = function() return true end,
         create = function() create_count = create_count + 1 end,
@@ -638,7 +786,13 @@ test("sending inside an existing chat never creates another chat", function()
                 return { role = "user", content = question }
             end,
             run = function()
-                return "New answer"
+                return "New answer", nil, nil, {
+                    requests = 1,
+                    measured_requests = 1,
+                    input_tokens = 40,
+                    output_tokens = 8,
+                    total_tokens = 48,
+                }
             end,
         },
         answer_viewer_class = {},
@@ -651,6 +805,13 @@ test("sending inside an existing chat never creates another chat", function()
             newProvider = function() return {} end,
         },
         storage = storage,
+        stats = {
+            record = function(_, book, usage)
+                same(book.id, "book-a", "statistics book")
+                recorded_usage = usage
+                return true
+            end,
+        },
         streaming = {},
         conversation = conversation,
         context = { ui = { document = document }, document = document },
@@ -661,6 +822,7 @@ test("sending inside an existing chat never creates another chat", function()
     same(create_count, 0, "no new chat created")
     same(chat.conversation, conversation, "existing conversation kept")
     same(#conversation.messages, 3, "question and answer added to existing chat")
+    same(recorded_usage.total_tokens, 48, "chat records model token use")
 end)
 
 test("book tools expose bounded search, read, links, toc, and position", function()
@@ -903,9 +1065,14 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     contains(main_source, 'localRequire("provider_openrouter")', "OpenRouter provider loaded")
     contains(main_source, 'localRequire("provider_anthropic")', "Anthropic provider loaded")
     contains(main_source, 'localRequire("chat_list")', "chat list loaded")
+    contains(main_source, 'localRequire("stats")', "statistics storage loaded")
     contains(main_source, 'Dispatcher:registerAction("insightful_show_chats"', "chat list gesture action")
     contains(main_source, 'sorting_hint = "tools"', "Insightful menu is placed in Tools")
     contains(main_source, 'text = _("New chat for highlighted actions")', "highlighted-action new-chat toggle")
+    contains(main_source, 'text = _("Statistics")', "statistics menu")
+    contains(main_source, 'text = _("General")', "general statistics menu")
+    contains(main_source, 'text = _("Current book")', "current-book statistics menu")
+    contains(main_source, 'text = _("All books")', "all-book statistics menu")
     contains(main_source, "function Insightful:openFromHighlight", "highlighted actions choose their chat")
     contains(main_source, "return self:startNewChat(selection, quick_action, focus_input)", "highlighted action can start a new chat")
     truthy(not chat_source:find("_startNewConversationForSend", 1, true), "messages inside a chat never create another chat")
