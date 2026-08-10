@@ -4,5 +4,5 @@ return {
     name = "insightful",
     fullname = _("Insightful"),
     description = _("An AI reading companion with saved chats and bounded access to the open book"),
-    version = "0.2.1",
+    version = "0.2.2",
 }
