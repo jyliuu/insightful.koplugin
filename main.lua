@@ -306,7 +306,7 @@ function Insightful:showHighlightActions(selection)
         UIManager:nextTick(function() self:openFromHighlight(selection, action, focus_input) end)
     end
     action_dialog = ButtonDialog:new{
-        title = _("AI"),
+        title = _("Insightful actions"),
         buttons = {
             {
                 { text = _("Explain"), callback = function() choose("explain", false) end },

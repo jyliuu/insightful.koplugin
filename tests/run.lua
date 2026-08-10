@@ -1219,6 +1219,8 @@ test("conversation screen uses the Markdown HTML viewer and embedded composer", 
     contains(main_source, 'moveMenuItemToFront("tools", self.name)', "Insightful menu is first in Tools")
     contains(main_source, 'sorting_hint = "tools"', "Insightful menu is placed in Tools")
     contains(main_source, 'text = _("New chat for highlighted actions")', "highlighted-action new-chat toggle")
+    contains(main_source, 'title = _("Insightful actions")', "highlight action dialog title")
+    truthy(not main_source:find('title = _("AI")', 1, true), "generic AI dialog title removed")
     contains(main_source, 'text = _("Statistics")', "statistics menu")
     contains(main_source, 'text = _("General")', "general statistics menu")
     contains(main_source, 'text = _("Current book")', "current-book statistics menu")
