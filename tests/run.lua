@@ -4,6 +4,7 @@ local root = script:match("^(.*)/tests/run%.lua$") or "."
 local Agent = dofile(root .. "/agent.lua")
 local BookTools = dofile(root .. "/book_tools.lua")
 local ConversationRenderer = dofile(root .. "/conversation_renderer.lua")
+local ModelCatalog = dofile(root .. "/model_catalog.lua")
 local ProviderProfiles = dofile(root .. "/provider_profiles.lua")
 local ProviderRegistry = dofile(root .. "/providers/registry.lua"):new{
     compatible = dofile(root .. "/providers/openai_compatible.lua"),
@@ -194,9 +195,81 @@ test("provider profiles list keys and merge shared settings", function()
     same(resolved.parameters.reasoning.effort, "low", "profile parameters")
     same(resolved.providers, nil, "profiles are not sent to provider adapters")
 
+    local chosen = ProviderProfiles.resolve(configuration, "openrouter", "vendor/chosen-model")
+    same(chosen.model, "vendor/chosen-model", "saved model overrides profile model")
+
     local fallback, fallback_id = ProviderProfiles.resolve(configuration, "anthropic")
     same(fallback_id, "deepseek", "missing key falls back to default")
     same(fallback.api_key, "deepseek-secret", "default profile key")
+end)
+
+test("model catalog uses provider endpoints and stays bounded", function()
+    local captured = {}
+    local decoded = {
+        data = {
+            { id = "vendor/one", name = "One" },
+            { id = "vendor/two", name = "Two" },
+            { id = "vendor/three", name = "Three" },
+        },
+    }
+    local catalog = ModelCatalog:new{
+        limit = 3,
+        json = { decode = function() return decoded end },
+        transport = function(url, headers, timeout, verify_ssl)
+            captured = {
+                url = url,
+                authorization = headers.Authorization,
+                timeout = timeout,
+                verify_ssl = verify_ssl,
+            }
+            return true, 200, "models", "OK"
+        end,
+    }
+    local models, truncated = catalog:list({
+        provider = "openrouter",
+        base_url = "https://openrouter.test/api/v1/chat/completions",
+        model = "openrouter/auto",
+        api_key = "secret",
+        timeout = 12,
+        verify_ssl = true,
+    }, "Claude Sonnet")
+    same(#models, 3, "bounded model count")
+    same(models[1].id, "openrouter/auto", "configured model first")
+    same(models[2].id, "vendor/one", "first returned model")
+    same(models[2].name, "One", "model display name")
+    same(truncated, true, "truncated model list")
+    contains(captured.url, "/api/v1/models?", "OpenRouter model endpoint")
+    contains(captured.url, "supported_parameters=tools", "tool-capable model filter")
+    contains(captured.url, "q=Claude%20Sonnet", "encoded model search")
+    same(captured.authorization, "Bearer secret", "model authorization")
+    same(captured.timeout, 12, "model request timeout")
+    same(captured.verify_ssl, true, "model certificate check")
+
+    decoded.data = {{ id = "deepseek-v4-flash" }, { id = "deepseek-v4-pro" }}
+    catalog:list({
+        provider = "deepseek",
+        base_url = "https://api.deepseek.test/chat/completions",
+        model = "deepseek-v4-flash",
+        api_key = "secret",
+    })
+    same(captured.url, "https://api.deepseek.test/models", "DeepSeek model endpoint")
+end)
+
+test("model catalog controls missing keys and invalid responses", function()
+    local catalog = ModelCatalog:new{
+        json = { decode = function() error("bad JSON") end },
+        transport = function() return true, 200, "bad", "OK" end,
+    }
+    local models, _, err = catalog:list({ provider = "deepseek", base_url = "https://api.deepseek.test" })
+    same(models, nil, "missing key model result")
+    contains(err, "API key", "missing model API key")
+    models, _, err = catalog:list({
+        provider = "deepseek",
+        base_url = "https://api.deepseek.test",
+        api_key = "secret",
+    })
+    same(models, nil, "invalid JSON model result")
+    contains(err, "invalid JSON", "invalid model JSON")
 end)
 
 test("agent executes search then read and returns final text", function()

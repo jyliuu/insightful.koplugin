@@ -59,7 +59,7 @@ Add an entry under `providers` for each service you want to use. Insightful list
 | `openrouter` | `https://openrouter.ai/api/v1/chat/completions` | OpenRouter Chat Completions |
 | `anthropic` | `https://api.anthropic.com/v1/messages` | Anthropic Messages |
 
-Here is a configuration with OpenAI and OpenRouter. Select the active service under **Insightful**, then **Provider**. Insightful saves only the selected provider name in KOReader settings. The API keys stay in `configuration.lua`.
+Here is a configuration with OpenAI and OpenRouter. Select the active service and model under **Insightful**, then **Provider**. Insightful saves the selected provider and model in KOReader settings. The API keys stay in `configuration.lua`.
 
 ```lua
 return {
@@ -82,6 +82,8 @@ return {
 ```
 
 The older flat configuration still works and appears as one provider. Move its endpoint, model, key, and provider-specific options into `providers` when you want to switch services from the menu.
+
+DeepSeek and OpenRouter can list models through their APIs. Open a provider in the menu and choose **Load available models**. Insightful shows at most 50 models. The OpenRouter request asks for text models that support tools, and its submenu also has **Search available models** because the catalog is much larger. **Enter model ID** lets you use an exact model that is not in the displayed list. Refreshing the list does not send a chat request.
 
 The sample configuration includes the less common settings, such as timeouts, extra request fields, and HTTP headers. Insightful leaves the output token limit and temperature unset for OpenAI, DeepSeek, and OpenRouter unless you choose values yourself. Anthropic requires `max_tokens`, so Insightful uses `8192` when you leave it out.
 

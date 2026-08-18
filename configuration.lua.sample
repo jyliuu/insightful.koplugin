@@ -20,7 +20,7 @@ return {
         },
         deepseek = {
             base_url = "https://api.deepseek.com/chat/completions",
-            model = "deepseek-chat",
+            model = "deepseek-v4-flash",
             api_key = "",
         },
         openrouter = {

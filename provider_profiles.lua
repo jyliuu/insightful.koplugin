@@ -82,7 +82,7 @@ local function commonConfiguration(configuration)
     return result
 end
 
-function Profiles.resolve(configuration, requested_provider)
+function Profiles.resolve(configuration, requested_provider, requested_model)
     configuration = type(configuration) == "table" and configuration or {}
     local available = Profiles.available(configuration)
     local available_set = {}
@@ -103,12 +103,14 @@ function Profiles.resolve(configuration, requested_provider)
         local legacy = copyTable(configuration)
         legacy.providers = nil
         legacy.provider = selected
+        if trim(requested_model) ~= "" then legacy.model = trim(requested_model) end
         return legacy, selected
     end
 
     local resolved = commonConfiguration(configuration)
     for key, value in pairs(profile) do resolved[copyTable(key)] = copyTable(value) end
     resolved.provider = selected
+    if trim(requested_model) ~= "" then resolved.model = trim(requested_model) end
     return resolved, selected
 end
 
