@@ -27,6 +27,7 @@ local AnswerViewer = localRequire("answer_viewer")
 local BookTools = localRequire("book_tools")
 local Chat = localRequire("chat")
 local ChatList = localRequire("chat_list")
+local ProviderProfiles = localRequire("provider_profiles")
 local ProviderRegistry = localRequire("providers/registry"):new{
     compatible = localRequire("providers/openai_compatible"),
     anthropic = localRequire("providers/anthropic"),
@@ -44,6 +45,8 @@ local Insightful = WidgetContainer:extend{
     name = "insightful",
     is_doc_only = true,
 }
+
+local ACTIVE_PROVIDER_SETTING = "insightful_provider"
 
 local function loadConfiguration()
     local path = PLUGIN_DIR .. "configuration.lua"
@@ -64,7 +67,12 @@ local function moveMenuItemToFront(menu_name, item_name)
 end
 
 function Insightful:init()
-    self.configuration = loadConfiguration()
+    self.base_configuration = loadConfiguration()
+    local saved_provider = G_reader_settings:readSetting(ACTIVE_PROVIDER_SETTING)
+    self.configuration, self.provider_id = ProviderProfiles.resolve(
+        self.base_configuration,
+        saved_provider
+    )
     self.storage = Storage.forUI({
         new_chat_on_send_default = function()
             return G_reader_settings:isTrue(NEW_CHAT_ON_HIGHLIGHT_DEFAULT)
@@ -210,6 +218,28 @@ local PROVIDER_NAMES = {
     openrouter = "OpenRouter",
 }
 
+function Insightful:availableProviders()
+    return ProviderProfiles.available(self.base_configuration)
+end
+
+function Insightful:selectProvider(provider_id)
+    if not ProviderProfiles.isAvailable(self.base_configuration, provider_id) then
+        return nil, "provider does not have a configured API key"
+    end
+    local ok, save_err = pcall(
+        G_reader_settings.saveSetting,
+        G_reader_settings,
+        ACTIVE_PROVIDER_SETTING,
+        provider_id
+    )
+    if not ok then return nil, tostring(save_err) end
+    self.configuration, self.provider_id = ProviderProfiles.resolve(
+        self.base_configuration,
+        provider_id
+    )
+    return true
+end
+
 function Insightful:showGeneralStatistics()
     local provider_id = ProviderRegistry:providerId(self.configuration)
     local parameters = type(self.configuration.parameters) == "table"
@@ -331,6 +361,28 @@ end
 
 function Insightful:addToMainMenu(menu_items)
     local book = self.storage:getBook(self.ui)
+    local provider_items = {}
+    for _, available_id in ipairs(self:availableProviders()) do
+        local provider_id = available_id
+        table.insert(provider_items, {
+            text = tostring(PROVIDER_NAMES[provider_id] or provider_id),
+            checked_func = function() return self.provider_id == provider_id end,
+            callback = function(touchmenu_instance)
+                local ok, save_err = self:selectProvider(provider_id)
+                if not ok then
+                    self:_showStorageError(_("The provider setting could not be saved."), save_err)
+                end
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+            keep_menu_open = true,
+        })
+    end
+    if #provider_items == 0 then
+        table.insert(provider_items, {
+            text = _("No providers with an API key"),
+            enabled = false,
+        })
+    end
     menu_items.insightful = {
         text = _("Insightful"),
         sorting_hint = "tools",
@@ -380,6 +432,14 @@ function Insightful:addToMainMenu(menu_items)
                 end,
                 keep_menu_open = true,
                 help_text = _("Tap to change this book. Hold to use its current value as the default for other books."),
+            },
+            {
+                text_func = function()
+                    local provider_id = self.provider_id or ProviderRegistry:providerId(self.configuration)
+                    return _("Provider: ") .. tostring(PROVIDER_NAMES[provider_id] or provider_id)
+                end,
+                sub_item_table = provider_items,
+                help_text = _("Only providers with an API key in configuration.lua are listed."),
             },
             {
                 text = _("Statistics"),

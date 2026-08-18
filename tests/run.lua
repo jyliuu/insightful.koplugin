@@ -4,6 +4,7 @@ local root = script:match("^(.*)/tests/run%.lua$") or "."
 local Agent = dofile(root .. "/agent.lua")
 local BookTools = dofile(root .. "/book_tools.lua")
 local ConversationRenderer = dofile(root .. "/conversation_renderer.lua")
+local ProviderProfiles = dofile(root .. "/provider_profiles.lua")
 local ProviderRegistry = dofile(root .. "/providers/registry.lua"):new{
     compatible = dofile(root .. "/providers/openai_compatible.lua"),
     anthropic = dofile(root .. "/providers/anthropic.lua"),
@@ -138,6 +139,65 @@ local function scriptedProvider(responses)
         end,
     }
 end
+
+test("legacy provider configuration remains available", function()
+    local configuration = {
+        provider = "deepseek",
+        base_url = "https://api.deepseek.test/chat/completions",
+        model = "deepseek-test",
+        api_key = "legacy-secret",
+        timeout = 45,
+    }
+    local available = ProviderProfiles.available(configuration)
+    same(#available, 1, "legacy provider count")
+    same(available[1], "deepseek", "legacy provider ID")
+    local resolved, selected = ProviderProfiles.resolve(configuration, "openrouter")
+    same(selected, "deepseek", "legacy fallback provider")
+    same(resolved.api_key, "legacy-secret", "legacy API key")
+    same(resolved.timeout, 45, "legacy timeout")
+end)
+
+test("provider profiles list keys and merge shared settings", function()
+    local configuration = {
+        provider = "deepseek",
+        timeout = 60,
+        stream = true,
+        verify_ssl = true,
+        providers = {
+            openai = { api_key = "" },
+            deepseek = {
+                api_key = "deepseek-secret",
+                base_url = "https://api.deepseek.test/chat/completions",
+                model = "deepseek-test",
+            },
+            openrouter = {
+                api_key = "openrouter-secret",
+                base_url = "https://openrouter.test/api/v1/chat/completions",
+                model = "openrouter/auto",
+                parameters = { reasoning = { effort = "low" } },
+            },
+        },
+    }
+    local available = ProviderProfiles.available(configuration)
+    same(#available, 2, "profile count")
+    same(available[1], "deepseek", "first configured profile")
+    same(available[2], "openrouter", "second configured profile")
+
+    local resolved, selected = ProviderProfiles.resolve(configuration, "openrouter")
+    same(selected, "openrouter", "selected provider")
+    same(resolved.provider, "openrouter", "resolved provider")
+    same(resolved.api_key, "openrouter-secret", "resolved API key")
+    same(resolved.base_url, "https://openrouter.test/api/v1/chat/completions", "resolved endpoint")
+    same(resolved.model, "openrouter/auto", "resolved model")
+    same(resolved.timeout, 60, "shared timeout")
+    same(resolved.stream, true, "shared streaming setting")
+    same(resolved.parameters.reasoning.effort, "low", "profile parameters")
+    same(resolved.providers, nil, "profiles are not sent to provider adapters")
+
+    local fallback, fallback_id = ProviderProfiles.resolve(configuration, "anthropic")
+    same(fallback_id, "deepseek", "missing key falls back to default")
+    same(fallback.api_key, "deepseek-secret", "default profile key")
+end)
 
 test("agent executes search then read and returns final text", function()
     local provider = scriptedProvider({
@@ -801,8 +861,9 @@ test("sending a follow-up appends to the open chat", function()
         messages = {{ role = "user", content = "Earlier question" }},
     }
     local recorded_usage
+    local plugin = { configuration = { provider = "openrouter", stream = false } }
     local chat = Chat:new{
-        plugin = {},
+        plugin = plugin,
         agent = {
             makeUserMessage = function(question)
                 return { role = "user", content = question }
@@ -824,7 +885,10 @@ test("sending a follow-up appends to the open chat", function()
             end,
         },
         provider_registry = {
-            newProvider = function() return {} end,
+            newProvider = function(_, configuration)
+                same(configuration.provider, "openrouter", "current plugin provider")
+                return {}
+            end,
         },
         storage = { save = function() return true end },
         stats = {
@@ -836,6 +900,7 @@ test("sending a follow-up appends to the open chat", function()
         },
         streaming = { httpPost = function() end },
         conversation = conversation,
+        configuration = { provider = "deepseek", stream = true },
         context = { ui = { document = document }, document = document },
     }
     chat.viewer = { update = function() end }
