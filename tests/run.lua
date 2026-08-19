@@ -1248,6 +1248,49 @@ test("a rate limited request explains itself and offers a retry", function()
     contains(chat.stream_status, "rate limiting", "the reader is told it was rate limited")
 end)
 
+local function reopenedChat(messages)
+    local document = {}
+    return Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = { new = function() return { currentPosition = function() end } end },
+        provider_registry = { newProvider = function() return { chat = function() end } end },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 200, "", "OK" end },
+        conversation = {
+            id = "chat-1",
+            book = { id = "book-a", title = "Book A" },
+            messages = messages,
+        },
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+end
+
+test("a chat reopened after a failure still offers a retry", function()
+    -- What storage holds after a failed request: the question, and no answer.
+    local chat = reopenedChat({ Agent.makeUserMessage("Why did this fail?", nil, 1) })
+    truthy(chat.can_retry, "an unanswered question can still be retried")
+    contains(chat.stream_status, "not answered", "the reader is told why Retry is offered")
+end)
+
+test("a chat reopened after an answer does not offer a retry", function()
+    local chat = reopenedChat({
+        Agent.makeUserMessage("What is this?", nil, 1),
+        { role = "assistant", content = "An answer.", timestamp = 2 },
+    })
+    truthy(not chat.can_retry, "an answered question is not retried")
+    same(chat.stream_status, nil, "an answered chat shows no banner")
+end)
+
+test("a new empty chat does not offer a retry", function()
+    local chat = reopenedChat({})
+    truthy(not chat.can_retry, "an empty chat has nothing to retry")
+    same(chat.stream_status, nil, "an empty chat shows no banner")
+end)
+
 test("a rejected API key does not offer a retry", function()
     local document = {}
     local conversation = {

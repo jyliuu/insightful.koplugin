@@ -71,7 +71,21 @@ function Chat:new(options)
     instance.stream_status = nil
     instance.stream_pending = {}
     instance.stream_flush_task = nil
+    -- A saved chat ending in a question was never answered, so it can be
+    -- retried. Deriving this from the conversation rather than keeping it in
+    -- memory means the offer survives closing and reopening the chat.
+    instance.can_retry = instance:_hasUnansweredQuestion()
+    if instance.can_retry then
+        instance.stream_status = _("This question was not answered. Tap Retry to send it again.")
+    end
     return instance
+end
+
+function Chat:_hasUnansweredQuestion()
+    local messages = self.conversation and self.conversation.messages
+    if type(messages) ~= "table" then return false end
+    local last = messages[#messages]
+    return type(last) == "table" and last.role == "user"
 end
 
 function Chat:_save(make_active)
