@@ -24,6 +24,7 @@ local Screen = Device.screen
 local ConversationViewer = InputContainer:extend{
     is_always_active = true,
     title = nil,
+    model = nil,
     messages = nil,
     stream_text = nil,
     status = nil,
@@ -132,7 +133,7 @@ td, th {
 ]]
 
 function ConversationViewer:_html()
-    return Renderer.render(self.messages, self.stream_text, self.status)
+    return Renderer.render(self.messages, self.stream_text, self.status, nil, self.model)
 end
 
 function ConversationViewer:_buildScrollWidget(outer_height)

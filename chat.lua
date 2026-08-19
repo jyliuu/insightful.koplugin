@@ -126,6 +126,8 @@ end
 
 function Chat:_updateViewer(refresh_text_only)
     if self.closed or not self.viewer then return end
+    -- The active model can change from the provider menu while a chat is open.
+    self.viewer.model = self:_activeModel()
     self.viewer:update(
         self.conversation.messages,
         self.stream_text,
@@ -133,6 +135,13 @@ function Chat:_updateViewer(refresh_text_only)
         self.busy,
         refresh_text_only == true
     )
+end
+
+function Chat:_activeModel()
+    local configuration = self.plugin and self.plugin.configuration or self.configuration
+    local model = configuration and configuration.model
+    if model == nil or model == "" then return nil end
+    return tostring(model)
 end
 
 function Chat:_showConversation()
@@ -144,6 +153,7 @@ function Chat:_showConversation()
     local viewer
     viewer = self.viewer_class:new{
         title = _("Insightful — ") .. tostring(self.conversation.book.title or _("Book")),
+        model = self:_activeModel(),
         messages = self.conversation.messages,
         stream_text = self.stream_text,
         status = self.stream_status,
@@ -324,6 +334,7 @@ function Chat:_send(question, selection, display_content)
         table.insert(self.conversation.messages, {
             role = "assistant",
             content = answer,
+            model = self:_activeModel(),
             timestamp = os.time(),
         })
         local saved, save_err = self:_save(not self.closed)

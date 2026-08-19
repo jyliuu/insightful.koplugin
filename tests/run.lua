@@ -1281,6 +1281,28 @@ test("conversation renderer separates user and Markdown AI messages", function()
     contains(html, 'class="message-separator"', "message separator")
 end)
 
+test("conversation renderer names the model beside the AI label", function()
+    local markdown = function(text) return "<md>" .. text .. "</md>" end
+    local html = ConversationRenderer.render({
+        { role = "assistant", content = "Saved answer", model = "gpt-4.1-mini" },
+    }, nil, nil, markdown)
+    contains(html, "AI — gpt-4.1-mini", "saved answer names its own model")
+
+    html = ConversationRenderer.render({}, "Live answer", nil, markdown, "deepseek-chat")
+    contains(html, "AI — deepseek-chat", "streaming answer names the active model")
+
+    html = ConversationRenderer.render({}, "", "Waiting for model response…", markdown, "claude-sonnet-4")
+    contains(html, "AI — claude-sonnet-4", "status line names the active model")
+
+    html = ConversationRenderer.render({}, "Live answer", nil, markdown, "<b>x</b>")
+    contains(html, "AI — &lt;b&gt;x&lt;/b&gt;", "model name is escaped")
+
+    html = ConversationRenderer.render({
+        { role = "assistant", content = "Answer from an older chat" },
+    }, nil, nil, markdown)
+    contains(html, '"role-label">AI<', "an answer saved without a model still says AI")
+end)
+
 test("conversation renderer accepts KOReader's callable Markdown table", function()
     local module_name = "apps/filemanager/lib/md"
     local previous_markdown = package.loaded[module_name]
