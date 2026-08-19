@@ -391,7 +391,7 @@ function ConversationViewer:onShow()
     return true
 end
 
-function ConversationViewer:onTap(_, ges)
+function ConversationViewer:onTap(_widget, ges)
     if not self.input_widget or not self.input_widget:isKeyboardVisible() then return end
     local keyboard = self.input_widget.keyboard
     if not keyboard or not keyboard.dimen or ges.pos:notIntersectWith(keyboard.dimen) then

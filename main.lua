@@ -381,7 +381,7 @@ function Insightful:_modelMenuItems(provider_id)
     local cached = self.model_lists[provider_id]
     local models = cached and cached.models or {{ id = current_model, name = current_model }}
     local items = {}
-    for _, model in ipairs(models) do
+    for _index, model in ipairs(models) do
         local model_id = model.id
         table.insert(items, {
             text = model_id,
@@ -559,7 +559,7 @@ end
 function Insightful:addToMainMenu(menu_items)
     local book = self.storage:getBook(self.ui)
     local provider_items = {}
-    for _, available_id in ipairs(self:availableProviders()) do
+    for _index, available_id in ipairs(self:availableProviders()) do
         local provider_id = available_id
         table.insert(provider_items, {
             text_func = function()
