@@ -1210,6 +1210,44 @@ test("retrying a highlighted action keeps the selected passage", function()
     same(#conversation.messages, 2, "the retry did not repeat the question")
 end)
 
+test("a rate limited request explains itself and offers a retry", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function()
+                        -- The wording the device logged when this happened.
+                        return nil, "AI service HTTP 429: Provider returned error"
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 429, "", "" end },
+        conversation = conversation,
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+
+    chat:_send("Anything")
+    truthy(chat.can_retry, "a rate limit is worth retrying")
+    contains(chat.stream_status, "rate limiting", "the reader is told it was rate limited")
+end)
+
 test("a rejected API key does not offer a retry", function()
     local document = {}
     local conversation = {

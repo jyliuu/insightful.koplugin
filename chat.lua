@@ -109,6 +109,8 @@ local function errorText(err)
         return _("Insightful is not configured. Copy configuration.lua.sample to configuration.lua and set api_key."), false
     elseif err:find("HTTP 401", 1, true) or err:find("HTTP 403", 1, true) then
         return _("The AI service rejected the API key."), false
+    elseif err:find("HTTP 429", 1, true) then
+        return _("The AI service is rate limiting requests. Wait a moment, then retry."), true
     elseif err:find("invalid JSON", 1, true) or err:find("invalid response", 1, true) then
         return _("The AI service returned an invalid response."), true
     elseif err:find("AI service returned", 1, true) then
