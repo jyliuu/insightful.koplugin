@@ -2,6 +2,19 @@
 
 This file records user visible changes to Insightful. Dates use the year, month, and day.
 
+## 0.3.0 (2026-08-19)
+
+### Added
+
+* `configuration.lua` can hold several provider profiles, and the Provider menu switches between the ones that have an API key.
+* The Provider menu lists a service's available models, with a search and an exact model ID entry. DeepSeek and OpenRouter supply their catalogs.
+* Insightful now ships a changelog of user visible changes.
+
+### Changed
+
+* The selected provider and model persist in KOReader settings. API keys stay in `configuration.lua`.
+* A configuration written in the older flat form still works and appears as a single provider.
+
 ## 0.2.2 (2026-08-10)
 
 ### Fixed

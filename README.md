@@ -41,7 +41,7 @@ Insightful works with OpenAI, DeepSeek, OpenRouter, and Anthropic. It does not b
 
 1. Copy this directory to `koreader/plugins/insightful.koplugin` on the device.
 2. Copy `configuration.lua.sample` to `configuration.lua`.
-3. Add your provider, endpoint, model, and API key to `configuration.lua`.
+3. Add one or more provider profiles to `configuration.lua`.
 4. Restart KOReader and open a book.
 
 You should now see **Insightful** in the reader menu. Its submenu lets you continue the current chat, open the chat list, start a new chat, or view token use. Select some text and **AI** should also appear in the highlight menu.
@@ -50,7 +50,7 @@ You should now see **Insightful** in the reader menu. Its submenu lets you conti
 
 ## Configure the provider
 
-Most people only need to change four values in `configuration.lua`. Pick a provider and copy its endpoint from the table. Then enter a model name and add the API key.
+Add an entry under `providers` for each service you want to use. Insightful lists a provider in its settings menu when that profile has an API key. The `provider` value at the top of the file is the default.
 
 | `provider` | Endpoint | API |
 | --- | --- | --- |
@@ -59,18 +59,31 @@ Most people only need to change four values in `configuration.lua`. Pick a provi
 | `openrouter` | `https://openrouter.ai/api/v1/chat/completions` | OpenRouter Chat Completions |
 | `anthropic` | `https://api.anthropic.com/v1/messages` | Anthropic Messages |
 
-Here is a small OpenAI configuration.
+Here is a configuration with OpenAI and OpenRouter. Select the active service and model under **Insightful**, then **Provider**. Insightful saves the selected provider and model in KOReader settings. The API keys stay in `configuration.lua`.
 
 ```lua
 return {
     provider = "openai",
-    base_url = "https://api.openai.com/v1/chat/completions",
-    model = "gpt-4.1-mini",
-    api_key = "YOUR_API_KEY",
     stream = true,
     verify_ssl = true,
+    providers = {
+        openai = {
+            base_url = "https://api.openai.com/v1/chat/completions",
+            model = "gpt-4.1-mini",
+            api_key = "YOUR_OPENAI_API_KEY",
+        },
+        openrouter = {
+            base_url = "https://openrouter.ai/api/v1/chat/completions",
+            model = "openrouter/auto",
+            api_key = "YOUR_OPENROUTER_API_KEY",
+        },
+    },
 }
 ```
+
+The older flat configuration still works and appears as one provider. Move its endpoint, model, key, and provider-specific options into `providers` when you want to switch services from the menu.
+
+DeepSeek and OpenRouter can list models through their APIs. Open a provider in the menu and choose **Load available models**. Insightful shows at most 50 models. The OpenRouter request asks for text models that support tools, and its submenu also has **Search available models** because the catalog is much larger. **Enter model ID** lets you use an exact model that is not in the displayed list. Refreshing the list does not send a chat request.
 
 The sample configuration includes the less common settings, such as timeouts, extra request fields, and HTTP headers. Insightful leaves the output token limit and temperature unset for OpenAI, DeepSeek, and OpenRouter unless you choose values yourself. Anthropic requires `max_tokens`, so Insightful uses `8192` when you leave it out.
 

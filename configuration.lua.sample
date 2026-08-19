@@ -1,30 +1,38 @@
 -- Copy this file to configuration.lua. That file is ignored by Git because it
 -- contains a secret.
 return {
-    -- Supported values: openai, deepseek, openrouter, anthropic.
+    -- This provider is used until another configured provider is selected in
+    -- Insightful's settings menu.
     provider = "openai",
 
-    -- Supply the complete endpoint for that provider.
-    base_url = "https://api.openai.com/v1/chat/completions",
-    model = "gpt-4.1-mini",
-    api_key = "",
-
+    -- These settings are shared by every provider profile below.
     timeout = 60,
-
-    -- Optional generation overrides. Leave unset to use provider defaults.
-    -- max_tokens = 4096,
-    -- temperature = 0.2,
-
-    -- Optional provider-specific request fields.
-    parameters = {},
-
-    -- Show reply text as it arrives. Set false to use one blocking request.
     stream = true,
-
-    -- Keep certificate verification enabled. Set this to false only when an old
-    -- device cannot validate the endpoint certificate and you accept the risk.
     verify_ssl = true,
 
-    -- Optional additional headers for another OpenAI-compatible endpoint.
-    headers = {},
+    -- The settings menu lists profiles whose api_key is not empty. Keep each
+    -- endpoint, model, key, and provider-specific option in its profile.
+    providers = {
+        openai = {
+            base_url = "https://api.openai.com/v1/chat/completions",
+            model = "gpt-4.1-mini",
+            api_key = "",
+        },
+        deepseek = {
+            base_url = "https://api.deepseek.com/chat/completions",
+            model = "deepseek-v4-flash",
+            api_key = "",
+        },
+        openrouter = {
+            base_url = "https://openrouter.ai/api/v1/chat/completions",
+            model = "openrouter/auto",
+            api_key = "",
+        },
+        anthropic = {
+            base_url = "https://api.anthropic.com/v1/messages",
+            model = "claude-sonnet-4-5",
+            api_key = "",
+            -- max_tokens = 8192,
+        },
+    },
 }

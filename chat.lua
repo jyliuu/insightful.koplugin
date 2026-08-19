@@ -277,10 +277,11 @@ function Chat:_send(question, selection, display_content)
 
     local book_tools = self.book_tools_class:new(self.context)
     local position = book_tools:currentPosition()
-    local stream_enabled = self.configuration.stream ~= false
+    local configuration = self.plugin and self.plugin.configuration or self.configuration
+    local stream_enabled = configuration.stream ~= false
     self.stream_control = {}
     local provider, provider_err = self.provider_registry:newProvider(
-        self.configuration,
+        configuration,
         self:_transport(),
         stream_enabled and self.http_post or nil
     )

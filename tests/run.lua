@@ -4,6 +4,8 @@ local root = script:match("^(.*)/tests/run%.lua$") or "."
 local Agent = dofile(root .. "/agent.lua")
 local BookTools = dofile(root .. "/book_tools.lua")
 local ConversationRenderer = dofile(root .. "/conversation_renderer.lua")
+local ModelCatalog = dofile(root .. "/model_catalog.lua")
+local ProviderProfiles = dofile(root .. "/provider_profiles.lua")
 local ProviderRegistry = dofile(root .. "/providers/registry.lua"):new{
     compatible = dofile(root .. "/providers/openai_compatible.lua"),
     anthropic = dofile(root .. "/providers/anthropic.lua"),
@@ -138,6 +140,137 @@ local function scriptedProvider(responses)
         end,
     }
 end
+
+test("legacy provider configuration remains available", function()
+    local configuration = {
+        provider = "deepseek",
+        base_url = "https://api.deepseek.test/chat/completions",
+        model = "deepseek-test",
+        api_key = "legacy-secret",
+        timeout = 45,
+    }
+    local available = ProviderProfiles.available(configuration)
+    same(#available, 1, "legacy provider count")
+    same(available[1], "deepseek", "legacy provider ID")
+    local resolved, selected = ProviderProfiles.resolve(configuration, "openrouter")
+    same(selected, "deepseek", "legacy fallback provider")
+    same(resolved.api_key, "legacy-secret", "legacy API key")
+    same(resolved.timeout, 45, "legacy timeout")
+end)
+
+test("provider profiles list keys and merge shared settings", function()
+    local configuration = {
+        provider = "deepseek",
+        timeout = 60,
+        stream = true,
+        verify_ssl = true,
+        providers = {
+            openai = { api_key = "" },
+            deepseek = {
+                api_key = "deepseek-secret",
+                base_url = "https://api.deepseek.test/chat/completions",
+                model = "deepseek-test",
+            },
+            openrouter = {
+                api_key = "openrouter-secret",
+                base_url = "https://openrouter.test/api/v1/chat/completions",
+                model = "openrouter/auto",
+                parameters = { reasoning = { effort = "low" } },
+            },
+        },
+    }
+    local available = ProviderProfiles.available(configuration)
+    same(#available, 2, "profile count")
+    same(available[1], "deepseek", "first configured profile")
+    same(available[2], "openrouter", "second configured profile")
+
+    local resolved, selected = ProviderProfiles.resolve(configuration, "openrouter")
+    same(selected, "openrouter", "selected provider")
+    same(resolved.provider, "openrouter", "resolved provider")
+    same(resolved.api_key, "openrouter-secret", "resolved API key")
+    same(resolved.base_url, "https://openrouter.test/api/v1/chat/completions", "resolved endpoint")
+    same(resolved.model, "openrouter/auto", "resolved model")
+    same(resolved.timeout, 60, "shared timeout")
+    same(resolved.stream, true, "shared streaming setting")
+    same(resolved.parameters.reasoning.effort, "low", "profile parameters")
+    same(resolved.providers, nil, "profiles are not sent to provider adapters")
+
+    local chosen = ProviderProfiles.resolve(configuration, "openrouter", "vendor/chosen-model")
+    same(chosen.model, "vendor/chosen-model", "saved model overrides profile model")
+
+    local fallback, fallback_id = ProviderProfiles.resolve(configuration, "anthropic")
+    same(fallback_id, "deepseek", "missing key falls back to default")
+    same(fallback.api_key, "deepseek-secret", "default profile key")
+end)
+
+test("model catalog uses provider endpoints and stays bounded", function()
+    local captured = {}
+    local decoded = {
+        data = {
+            { id = "vendor/one", name = "One" },
+            { id = "vendor/two", name = "Two" },
+            { id = "vendor/three", name = "Three" },
+        },
+    }
+    local catalog = ModelCatalog:new{
+        limit = 3,
+        json = { decode = function() return decoded end },
+        transport = function(url, headers, timeout, verify_ssl)
+            captured = {
+                url = url,
+                authorization = headers.Authorization,
+                timeout = timeout,
+                verify_ssl = verify_ssl,
+            }
+            return true, 200, "models", "OK"
+        end,
+    }
+    local models, truncated = catalog:list({
+        provider = "openrouter",
+        base_url = "https://openrouter.test/api/v1/chat/completions",
+        model = "openrouter/auto",
+        api_key = "secret",
+        timeout = 12,
+        verify_ssl = true,
+    }, "Claude Sonnet")
+    same(#models, 3, "bounded model count")
+    same(models[1].id, "openrouter/auto", "configured model first")
+    same(models[2].id, "vendor/one", "first returned model")
+    same(models[2].name, "One", "model display name")
+    same(truncated, true, "truncated model list")
+    contains(captured.url, "/api/v1/models?", "OpenRouter model endpoint")
+    contains(captured.url, "supported_parameters=tools", "tool-capable model filter")
+    contains(captured.url, "q=Claude%20Sonnet", "encoded model search")
+    same(captured.authorization, "Bearer secret", "model authorization")
+    same(captured.timeout, 12, "model request timeout")
+    same(captured.verify_ssl, true, "model certificate check")
+
+    decoded.data = {{ id = "deepseek-v4-flash" }, { id = "deepseek-v4-pro" }}
+    catalog:list({
+        provider = "deepseek",
+        base_url = "https://api.deepseek.test/chat/completions",
+        model = "deepseek-v4-flash",
+        api_key = "secret",
+    })
+    same(captured.url, "https://api.deepseek.test/models", "DeepSeek model endpoint")
+end)
+
+test("model catalog controls missing keys and invalid responses", function()
+    local catalog = ModelCatalog:new{
+        json = { decode = function() error("bad JSON") end },
+        transport = function() return true, 200, "bad", "OK" end,
+    }
+    local models, _, err = catalog:list({ provider = "deepseek", base_url = "https://api.deepseek.test" })
+    same(models, nil, "missing key model result")
+    contains(err, "API key", "missing model API key")
+    models, _, err = catalog:list({
+        provider = "deepseek",
+        base_url = "https://api.deepseek.test",
+        api_key = "secret",
+    })
+    same(models, nil, "invalid JSON model result")
+    contains(err, "invalid JSON", "invalid model JSON")
+end)
 
 test("agent executes search then read and returns final text", function()
     local provider = scriptedProvider({
@@ -801,8 +934,9 @@ test("sending a follow-up appends to the open chat", function()
         messages = {{ role = "user", content = "Earlier question" }},
     }
     local recorded_usage
+    local plugin = { configuration = { provider = "openrouter", stream = false } }
     local chat = Chat:new{
-        plugin = {},
+        plugin = plugin,
         agent = {
             makeUserMessage = function(question)
                 return { role = "user", content = question }
@@ -824,7 +958,10 @@ test("sending a follow-up appends to the open chat", function()
             end,
         },
         provider_registry = {
-            newProvider = function() return {} end,
+            newProvider = function(_, configuration)
+                same(configuration.provider, "openrouter", "current plugin provider")
+                return {}
+            end,
         },
         storage = { save = function() return true end },
         stats = {
@@ -836,6 +973,7 @@ test("sending a follow-up appends to the open chat", function()
         },
         streaming = { httpPost = function() end },
         conversation = conversation,
+        configuration = { provider = "deepseek", stream = true },
         context = { ui = { document = document }, document = document },
     }
     chat.viewer = { update = function() end }

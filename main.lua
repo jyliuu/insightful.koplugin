@@ -2,6 +2,8 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Dispatcher = require("dispatcher")
 local InfoMessage = require("ui/widget/infomessage")
+local InputDialog = require("ui/widget/inputdialog")
+local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
@@ -27,6 +29,8 @@ local AnswerViewer = localRequire("answer_viewer")
 local BookTools = localRequire("book_tools")
 local Chat = localRequire("chat")
 local ChatList = localRequire("chat_list")
+local ModelCatalog = localRequire("model_catalog")
+local ProviderProfiles = localRequire("provider_profiles")
 local ProviderRegistry = localRequire("providers/registry"):new{
     compatible = localRequire("providers/openai_compatible"),
     anthropic = localRequire("providers/anthropic"),
@@ -44,6 +48,47 @@ local Insightful = WidgetContainer:extend{
     name = "insightful",
     is_doc_only = true,
 }
+
+local ACTIVE_PROVIDER_SETTING = "insightful_provider"
+local ACTIVE_MODEL_SETTING_PREFIX = "insightful_model_"
+local MAX_MODEL_RESPONSE_BYTES = 4 * 1024 * 1024
+
+local function modelCatalogGet(url, headers, timeout, verify_ssl)
+    local socketutil = require("socketutil")
+    local client
+    local is_https = tostring(url):match("^https://") ~= nil
+    local previous_cert_verify
+    if is_https then
+        client = require("ssl.https")
+        previous_cert_verify = client.cert_verify
+        client.cert_verify = verify_ssl ~= false
+    else
+        client = require("socket.http")
+    end
+
+    local chunks = {}
+    local bytes = 0
+    local function boundedSink(chunk)
+        if chunk then
+            bytes = bytes + #chunk
+            if bytes > MAX_MODEL_RESPONSE_BYTES then return nil, "model list is too large" end
+            table.insert(chunks, chunk)
+        end
+        return 1
+    end
+
+    socketutil:set_timeout(timeout or 30, timeout or 30)
+    local request_ok, ok, code, _, status = pcall(client.request, {
+        url = url,
+        method = "GET",
+        headers = headers,
+        sink = boundedSink,
+    })
+    socketutil:reset_timeout()
+    if is_https then client.cert_verify = previous_cert_verify end
+    if not request_ok then return false, nil, "", tostring(ok) end
+    return ok ~= nil, code, table.concat(chunks), status
+end
 
 local function loadConfiguration()
     local path = PLUGIN_DIR .. "configuration.lua"
@@ -64,7 +109,20 @@ local function moveMenuItemToFront(menu_name, item_name)
 end
 
 function Insightful:init()
-    self.configuration = loadConfiguration()
+    self.base_configuration = loadConfiguration()
+    local saved_provider = G_reader_settings:readSetting(ACTIVE_PROVIDER_SETTING)
+    local provider_id = select(2, ProviderProfiles.resolve(
+        self.base_configuration,
+        saved_provider
+    ))
+    local saved_model = G_reader_settings:readSetting(ACTIVE_MODEL_SETTING_PREFIX .. provider_id)
+    self.configuration, self.provider_id = ProviderProfiles.resolve(
+        self.base_configuration,
+        provider_id,
+        saved_model
+    )
+    self.model_catalog = ModelCatalog:new{ transport = modelCatalogGet }
+    self.model_lists = {}
     self.storage = Storage.forUI({
         new_chat_on_send_default = function()
             return G_reader_settings:isTrue(NEW_CHAT_ON_HIGHLIGHT_DEFAULT)
@@ -210,6 +268,175 @@ local PROVIDER_NAMES = {
     openrouter = "OpenRouter",
 }
 
+function Insightful:availableProviders()
+    return ProviderProfiles.available(self.base_configuration)
+end
+
+function Insightful:_configurationForProvider(provider_id)
+    local saved_model = G_reader_settings:readSetting(ACTIVE_MODEL_SETTING_PREFIX .. provider_id)
+    return ProviderProfiles.resolve(self.base_configuration, provider_id, saved_model)
+end
+
+function Insightful:selectProvider(provider_id, model_id)
+    if not ProviderProfiles.isAvailable(self.base_configuration, provider_id) then
+        return nil, "provider does not have a configured API key"
+    end
+    local current = self:_configurationForProvider(provider_id)
+    model_id = tostring(model_id or current.model or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if model_id == "" then return nil, "model ID is empty" end
+    local model_ok, model_err = pcall(
+        G_reader_settings.saveSetting,
+        G_reader_settings,
+        ACTIVE_MODEL_SETTING_PREFIX .. provider_id,
+        model_id
+    )
+    if not model_ok then return nil, tostring(model_err) end
+    local provider_ok, provider_err = pcall(
+        G_reader_settings.saveSetting,
+        G_reader_settings,
+        ACTIVE_PROVIDER_SETTING,
+        provider_id
+    )
+    if not provider_ok then return nil, tostring(provider_err) end
+    self.configuration, self.provider_id = ProviderProfiles.resolve(
+        self.base_configuration,
+        provider_id,
+        model_id
+    )
+    return true
+end
+
+function Insightful:_showModelError(message)
+    UIManager:show(InfoMessage:new{
+        text = tostring(message or _("The model list could not be loaded.")),
+        icon = "notice-warning",
+    })
+end
+
+function Insightful:_refreshModelMenu(provider_id, query, touchmenu_instance)
+    local configuration = self:_configurationForProvider(provider_id)
+    local completed, models, truncated, lookup_err = Trapper:dismissableRunInSubprocess(
+        function() return self.model_catalog:list(configuration, query) end,
+        _("Loading available models…")
+    )
+    if not completed then return end
+    if not models then
+        self:_showModelError(lookup_err)
+        return
+    end
+    self.model_lists[provider_id] = {
+        models = models,
+        truncated = truncated == true,
+        query = query,
+    }
+    if touchmenu_instance then
+        touchmenu_instance.item_table = self:_modelMenuItems(provider_id)
+        touchmenu_instance:updateItems(1)
+    end
+end
+
+function Insightful:_showModelInput(provider_id, touchmenu_instance, search)
+    local configuration = self:_configurationForProvider(provider_id)
+    local dialog
+    dialog = InputDialog:new{
+        title = search and _("Search available models") or _("Enter model ID"),
+        input = search and "" or tostring(configuration.model or ""),
+        input_hint = search and _("Model name or ID") or _("Exact provider model ID"),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function() UIManager:close(dialog) end,
+                },
+                {
+                    text = search and _("Search") or _("Use"),
+                    is_enter_default = true,
+                    callback = function()
+                        local value = tostring(dialog:getInputText() or "")
+                            :gsub("^%s+", ""):gsub("%s+$", "")
+                        if value == "" then return end
+                        UIManager:close(dialog)
+                        if search then
+                            Trapper:wrap(function()
+                                self:_refreshModelMenu(provider_id, value, touchmenu_instance)
+                            end)
+                        else
+                            local ok, save_err = self:selectProvider(provider_id, value)
+                            if not ok then self:_showModelError(save_err) end
+                            if touchmenu_instance then touchmenu_instance:updateItems() end
+                        end
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function Insightful:_modelMenuItems(provider_id)
+    local configuration = self:_configurationForProvider(provider_id)
+    local current_model = tostring(configuration.model or "")
+    local cached = self.model_lists[provider_id]
+    local models = cached and cached.models or {{ id = current_model, name = current_model }}
+    local items = {}
+    for _, model in ipairs(models) do
+        local model_id = model.id
+        table.insert(items, {
+            text = model_id,
+            help_text = model.name ~= model_id and model.name or nil,
+            checked_func = function()
+                return self.provider_id == provider_id
+                    and tostring(self.configuration.model or "") == model_id
+            end,
+            callback = function(touchmenu_instance)
+                local ok, save_err = self:selectProvider(provider_id, model_id)
+                if not ok then self:_showModelError(save_err) end
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+            keep_menu_open = true,
+        })
+    end
+    if cached and cached.truncated then
+        table.insert(items, {
+            text = _("Only the first 50 models are shown"),
+            enabled = false,
+        })
+    end
+    if self.model_catalog:supports(configuration) then
+        table.insert(items, {
+            text = cached and _("Refresh available models") or _("Load available models"),
+            callback = function(touchmenu_instance)
+                Trapper:wrap(function()
+                    self:_refreshModelMenu(provider_id, nil, touchmenu_instance)
+                end)
+            end,
+            keep_menu_open = true,
+            separator = provider_id ~= "openrouter",
+        })
+        if provider_id == "openrouter" then
+            table.insert(items, {
+                text = _("Search available models…"),
+                callback = function(touchmenu_instance)
+                    self:_showModelInput(provider_id, touchmenu_instance, true)
+                end,
+                keep_menu_open = true,
+                separator = true,
+            })
+        end
+    end
+    table.insert(items, {
+        text = _("Enter model ID…"),
+        callback = function(touchmenu_instance)
+            self:_showModelInput(provider_id, touchmenu_instance, false)
+        end,
+        keep_menu_open = true,
+    })
+    items.ignored_by_menu_search = true
+    return items
+end
+
 function Insightful:showGeneralStatistics()
     local provider_id = ProviderRegistry:providerId(self.configuration)
     local parameters = type(self.configuration.parameters) == "table"
@@ -331,6 +558,25 @@ end
 
 function Insightful:addToMainMenu(menu_items)
     local book = self.storage:getBook(self.ui)
+    local provider_items = {}
+    for _, available_id in ipairs(self:availableProviders()) do
+        local provider_id = available_id
+        table.insert(provider_items, {
+            text_func = function()
+                local configuration = self:_configurationForProvider(provider_id)
+                return tostring(PROVIDER_NAMES[provider_id] or provider_id)
+                    .. ": " .. tostring(configuration.model or _("Not set"))
+            end,
+            checked_func = function() return self.provider_id == provider_id end,
+            sub_item_table_func = function() return self:_modelMenuItems(provider_id) end,
+        })
+    end
+    if #provider_items == 0 then
+        table.insert(provider_items, {
+            text = _("No providers with an API key"),
+            enabled = false,
+        })
+    end
     menu_items.insightful = {
         text = _("Insightful"),
         sorting_hint = "tools",
@@ -380,6 +626,14 @@ function Insightful:addToMainMenu(menu_items)
                 end,
                 keep_menu_open = true,
                 help_text = _("Tap to change this book. Hold to use its current value as the default for other books."),
+            },
+            {
+                text_func = function()
+                    local provider_id = self.provider_id or ProviderRegistry:providerId(self.configuration)
+                    return _("Provider: ") .. tostring(PROVIDER_NAMES[provider_id] or provider_id)
+                end,
+                sub_item_table = provider_items,
+                help_text = _("Choose a provider and model. Only providers with an API key in configuration.lua are listed."),
             },
             {
                 text = _("Statistics"),
