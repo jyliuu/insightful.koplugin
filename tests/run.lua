@@ -1159,6 +1159,57 @@ test("a failed request offers a retry that resends the same question", function(
     truthy(not chat.can_retry, "a successful retry clears the retry offer")
 end)
 
+test("retrying a highlighted action keeps the selected passage", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local attempts = 0
+    local last_messages
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function(_, request)
+                        attempts = attempts + 1
+                        last_messages = request.messages
+                        if attempts == 1 then
+                            return nil, "Couldn't reach the AI service: timeout"
+                        end
+                        return { text = "Explained after the retry." }
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 200, "", "OK" end },
+        conversation = conversation,
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+    chat.pending_selection = { text = "The selected passage text", section = "Chapter 3" }
+
+    chat:_send(Agent.quick_actions.explain, chat.pending_selection, "Explain this passage")
+    same(attempts, 1, "the highlighted action was attempted")
+    contains(last_messages[1].content, "The selected passage text", "the first attempt sent the passage")
+
+    chat:_retry()
+    same(attempts, 2, "the retry ran")
+    contains(last_messages[1].content, "The selected passage text", "the retry still sends the passage")
+    contains(last_messages[1].content, "Chapter 3", "the retry keeps the passage location")
+    same(#conversation.messages, 2, "the retry did not repeat the question")
+end)
+
 test("a rejected API key does not offer a retry", function()
     local document = {}
     local conversation = {
