@@ -95,9 +95,15 @@ Choose **Ask AI…** when you want to write the question yourself. The conversat
 
 The four shortcuts send their questions immediately. They use the current chat unless **New chat for highlighted actions** is on.
 
+When that setting is off, the highlighted passage menu also shows **Start a new chat**. Tick it before choosing an action to put that one answer in a fresh chat. It applies to that highlight only and does not change the setting for the book.
+
 Open **Insightful** from the reader menu when you want to manage chats for the current book. Choose **Chats** to see the saved chats, or tap the menu icon in an open chat. Tap a chat to open it. Hold a chat and confirm the prompt to delete it. Choose **Start new chat** when you want a blank conversation.
 
 Turn on **New chat for highlighted actions** when each button chosen from the highlighted passage menu should start a separate chat. This includes **Ask AI…**. Once the chat is open, later messages continue that chat. The setting applies only to the current book.
+
+Each answer is labelled with the model that wrote it, so a chat that spans a provider or model change still shows which model produced each reply. Answers saved before this was added are labelled **AI**.
+
+If a request fails, the error appears in the chat and **Retry** becomes available. It runs the same question again without adding a second copy of it to the chat. Failures that cannot succeed on a second attempt, such as a missing or rejected API key, leave **Retry** disabled because the configuration has to change first.
 
 ## Check token use
 

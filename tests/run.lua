@@ -1108,6 +1108,188 @@ test("non-streaming request uses the background transport", function()
     same(conversation.messages[2].content, "Complete background answer.", "complete response saved")
 end)
 
+test("a failed request offers a retry that resends the same question", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local attempts = 0
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function()
+                        attempts = attempts + 1
+                        if attempts == 1 then
+                            return nil, "Couldn't reach the AI service: timeout"
+                        end
+                        return { text = "Answer after the retry." }
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 200, "", "OK" end },
+        conversation = conversation,
+        configuration = { stream = false, model = "gpt-4.1-mini" },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+
+    chat:_send("Why did this fail?")
+    same(attempts, 1, "the first attempt ran")
+    truthy(chat.can_retry, "an unreachable service offers a retry")
+    same(#conversation.messages, 1, "only the question is stored after a failure")
+
+    chat:_retry()
+    same(attempts, 2, "the retry ran a second attempt")
+    same(#conversation.messages, 2, "the retry did not repeat the question")
+    same(conversation.messages[1].role, "user", "the question is kept")
+    same(conversation.messages[2].content, "Answer after the retry.", "the retry answer is saved")
+    same(conversation.messages[2].model, "gpt-4.1-mini", "the answer records its model")
+    truthy(not chat.can_retry, "a successful retry clears the retry offer")
+end)
+
+test("retrying a highlighted action keeps the selected passage", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local attempts = 0
+    local last_messages
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function(_, request)
+                        attempts = attempts + 1
+                        last_messages = request.messages
+                        if attempts == 1 then
+                            return nil, "Couldn't reach the AI service: timeout"
+                        end
+                        return { text = "Explained after the retry." }
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 200, "", "OK" end },
+        conversation = conversation,
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+    chat.pending_selection = { text = "The selected passage text", section = "Chapter 3" }
+
+    chat:_send(Agent.quick_actions.explain, chat.pending_selection, "Explain this passage")
+    same(attempts, 1, "the highlighted action was attempted")
+    contains(last_messages[1].content, "The selected passage text", "the first attempt sent the passage")
+
+    chat:_retry()
+    same(attempts, 2, "the retry ran")
+    contains(last_messages[1].content, "The selected passage text", "the retry still sends the passage")
+    contains(last_messages[1].content, "Chapter 3", "the retry keeps the passage location")
+    same(#conversation.messages, 2, "the retry did not repeat the question")
+end)
+
+test("a rate limited request explains itself and offers a retry", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function()
+                        -- The wording the device logged when this happened.
+                        return nil, "AI service HTTP 429: Provider returned error"
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 429, "", "" end },
+        conversation = conversation,
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+
+    chat:_send("Anything")
+    truthy(chat.can_retry, "a rate limit is worth retrying")
+    contains(chat.stream_status, "rate limiting", "the reader is told it was rate limited")
+end)
+
+test("a rejected API key does not offer a retry", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local attempts = 0
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function()
+                        attempts = attempts + 1
+                        return nil, "HTTP 401 unauthorized"
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 401, "", "" end },
+        conversation = conversation,
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+
+    chat:_send("Anything")
+    same(attempts, 1, "the request was attempted")
+    truthy(not chat.can_retry, "a rejected key needs a configuration change, not a retry")
+
+    chat:_retry()
+    same(attempts, 1, "retrying a rejected key does nothing")
+end)
+
 test("background save does not replace another active chat", function()
     local factory = memorySettingsFactory()
     local storage = Storage:new{
@@ -1279,6 +1461,28 @@ test("conversation renderer separates user and Markdown AI messages", function()
     contains(html, '<md># Finished answer</md>', "saved AI Markdown")
     contains(html, '<md>**Live answer**</md>', "streaming AI Markdown")
     contains(html, 'class="message-separator"', "message separator")
+end)
+
+test("conversation renderer names the model beside the AI label", function()
+    local markdown = function(text) return "<md>" .. text .. "</md>" end
+    local html = ConversationRenderer.render({
+        { role = "assistant", content = "Saved answer", model = "gpt-4.1-mini" },
+    }, nil, nil, markdown)
+    contains(html, "AI — gpt-4.1-mini", "saved answer names its own model")
+
+    html = ConversationRenderer.render({}, "Live answer", nil, markdown, "deepseek-chat")
+    contains(html, "AI — deepseek-chat", "streaming answer names the active model")
+
+    html = ConversationRenderer.render({}, "", "Waiting for model response…", markdown, "claude-sonnet-4")
+    contains(html, "AI — claude-sonnet-4", "status line names the active model")
+
+    html = ConversationRenderer.render({}, "Live answer", nil, markdown, "<b>x</b>")
+    contains(html, "AI — &lt;b&gt;x&lt;/b&gt;", "model name is escaped")
+
+    html = ConversationRenderer.render({
+        { role = "assistant", content = "Answer from an older chat" },
+    }, nil, nil, markdown)
+    contains(html, '"role-label">AI<', "an answer saved without a model still says AI")
 end)
 
 test("conversation renderer accepts KOReader's callable Markdown table", function()

@@ -24,6 +24,8 @@ local Screen = Device.screen
 local ConversationViewer = InputContainer:extend{
     is_always_active = true,
     title = nil,
+    model = nil,
+    can_retry = false,
     messages = nil,
     stream_text = nil,
     status = nil,
@@ -132,7 +134,7 @@ td, th {
 ]]
 
 function ConversationViewer:_html()
-    return Renderer.render(self.messages, self.stream_text, self.status)
+    return Renderer.render(self.messages, self.stream_text, self.status, nil, self.model)
 end
 
 function ConversationViewer:_buildScrollWidget(outer_height)
@@ -307,6 +309,12 @@ function ConversationViewer:init()
                 callback = function() if self.on_stop then self.on_stop() end end,
             },
             {
+                text = _("Retry"),
+                id = "retry",
+                enabled_func = function() return self.can_retry == true and not self.busy end,
+                callback = function() if self.on_retry then self.on_retry() end end,
+            },
+            {
                 text = "⇱",
                 callback = function() self.scroll_widget:scrollToRatio(0) end,
             },
@@ -374,6 +382,10 @@ function ConversationViewer:update(messages, stream_text, status, busy, refresh_
     self.status = status
     self.busy = busy == true
     self.send_button:enableDisable(not self.busy)
+    local retry_button = self.button_table:getButtonById("retry")
+    if retry_button then
+        retry_button:enableDisable(self.can_retry == true and not self.busy)
+    end
     self:_resizeLayout(self.available_height or self.height, false, page_number)
     if refresh_region then
         UIManager:setDirty(self, "ui", refresh_region)
@@ -391,7 +403,7 @@ function ConversationViewer:onShow()
     return true
 end
 
-function ConversationViewer:onTap(_, ges)
+function ConversationViewer:onTap(_widget, ges)
     if not self.input_widget or not self.input_widget:isKeyboardVisible() then return end
     local keyboard = self.input_widget.keyboard
     if not keyboard or not keyboard.dimen or ges.pos:notIntersectWith(keyboard.dimen) then

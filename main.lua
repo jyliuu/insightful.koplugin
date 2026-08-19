@@ -381,7 +381,7 @@ function Insightful:_modelMenuItems(provider_id)
     local cached = self.model_lists[provider_id]
     local models = cached and cached.models or {{ id = current_model, name = current_model }}
     local items = {}
-    for _, model in ipairs(models) do
+    for _index, model in ipairs(models) do
         local model_id = model.id
         table.insert(items, {
             text = model_id,
@@ -503,13 +503,13 @@ function Insightful:startNewChat(selection, quick_action)
     self:_openConversation(conversation, selection, quick_action)
 end
 
-function Insightful:openFromHighlight(selection, quick_action)
+function Insightful:openFromHighlight(selection, quick_action, force_new_chat)
     local book = self.storage:getBook(self.ui)
     local enabled, setting_err = self.storage:getNewChatOnSend(book)
     if setting_err then
         logger.warn("Insightful: highlighted-action chat setting could not be read:", setting_err)
     end
-    if enabled then
+    if enabled or force_new_chat then
         return self:startNewChat(selection, quick_action)
     end
     return self:openChat(selection, quick_action)
@@ -531,27 +531,62 @@ function Insightful:onShowInsightfulChats()
     return true
 end
 
+-- KOReader's own CheckMark widget uses these glyphs, so they render on device.
+local CHECKED_PREFIX = "✓ "
+local UNCHECKED_PREFIX = "▢ "
+
 function Insightful:showHighlightActions(selection)
     local action_dialog
+    local book = self.storage:getBook(self.ui)
+    local always_new, setting_err = self.storage:getNewChatOnSend(book)
+    if setting_err then
+        logger.warn("Insightful: highlighted-action chat setting could not be read:", setting_err)
+    end
+    -- A one-shot override for this highlight only. The per-book setting is
+    -- never written, so the next highlight starts unticked again.
+    local start_new_chat = false
+    local function newChatText()
+        return (start_new_chat and CHECKED_PREFIX or UNCHECKED_PREFIX) .. _("Start a new chat")
+    end
     local function choose(action)
+        local force_new_chat = start_new_chat
         UIManager:close(action_dialog)
-        UIManager:nextTick(function() self:openFromHighlight(selection, action) end)
+        UIManager:nextTick(function()
+            self:openFromHighlight(selection, action, force_new_chat)
+        end)
+    end
+    local buttons = {
+        {
+            { text = _("Explain"), callback = function() choose("explain") end },
+            { text = _("Explain terms"), callback = function() choose("explain_terms") end },
+        },
+        {
+            { text = _("Context / history"), callback = function() choose("context_history") end },
+            { text = _("People / characters"), callback = function() choose("people_characters") end },
+        },
+        {
+            { text = _("Ask AI…"), callback = function() choose() end },
+        },
+    }
+    if not always_new then
+        table.insert(buttons, {
+            {
+                text = newChatText(),
+                id = "start_new_chat",
+                callback = function()
+                    start_new_chat = not start_new_chat
+                    local button = action_dialog and action_dialog:getButtonById("start_new_chat")
+                    if not button then return end
+                    -- Keeping the width conserves the frame, which Button:refresh needs.
+                    button:setText(newChatText(), button.width)
+                    button:refresh()
+                end,
+            },
+        })
     end
     action_dialog = ButtonDialog:new{
         title = _("Insightful actions"),
-        buttons = {
-            {
-                { text = _("Explain"), callback = function() choose("explain") end },
-                { text = _("Explain terms"), callback = function() choose("explain_terms") end },
-            },
-            {
-                { text = _("Context / history"), callback = function() choose("context_history") end },
-                { text = _("People / characters"), callback = function() choose("people_characters") end },
-            },
-            {
-                { text = _("Ask AI…"), callback = function() choose() end },
-            },
-        },
+        buttons = buttons,
     }
     UIManager:show(action_dialog)
 end
@@ -559,7 +594,7 @@ end
 function Insightful:addToMainMenu(menu_items)
     local book = self.storage:getBook(self.ui)
     local provider_items = {}
-    for _, available_id in ipairs(self:availableProviders()) do
+    for _index, available_id in ipairs(self:availableProviders()) do
         local provider_id = available_id
         table.insert(provider_items, {
             text_func = function()

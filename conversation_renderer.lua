@@ -88,11 +88,17 @@ local function userMessage(message)
     })
 end
 
-local function assistantMessage(content, markdown, streaming)
+local function assistantLabel(model)
+    model = tostring(model or "")
+    if model == "" then return "AI" end
+    return "AI — " .. escapeHtml(model)
+end
+
+local function assistantMessage(content, markdown, streaming, model)
     local class = streaming and "ai-message streaming" or "ai-message"
     return table.concat({
         '<div class="', class, '">',
-        '<div class="role-label">AI</div>',
+        '<div class="role-label">', assistantLabel(model), "</div>",
         '<div class="ai-text">', markdown(content or ""), "</div>",
         "</div>",
         '<hr class="message-separator"/>',
@@ -118,25 +124,25 @@ local function toolMessage(status)
     })
 end
 
-function Renderer.render(messages, stream_text, status, markdown)
+function Renderer.render(messages, stream_text, status, markdown, model)
     markdown = type(markdown) == "function" and markdown or defaultMarkdown
     local html = {}
     for _, message in ipairs(messages or {}) do
         if message.role == "user" then
             table.insert(html, userMessage(message))
         elseif message.role == "assistant" and type(message.content) == "string" then
-            table.insert(html, assistantMessage(message.content, markdown, false))
+            table.insert(html, assistantMessage(message.content, markdown, false, message.model))
         end
     end
     if stream_text and stream_text ~= "" then
-        table.insert(html, assistantMessage(stream_text, markdown, true))
+        table.insert(html, assistantMessage(stream_text, markdown, true, model))
     elseif type(status) == "table" and status.kind == "tool" then
         table.insert(html, toolMessage(status))
     elseif status and status ~= "" then
         local body = '<p class="stream-status">' .. escapeHtml(status) .. "</p>"
         table.insert(html, table.concat({
             '<div class="ai-message streaming">',
-            '<div class="role-label">AI</div>',
+            '<div class="role-label">', assistantLabel(model), "</div>",
             '<div class="ai-text">', body, "</div>",
             "</div>",
             '<hr class="message-separator"/>',
