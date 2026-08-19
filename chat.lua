@@ -100,34 +100,38 @@ function Chat:_transport()
     end
 end
 
+-- Returns the message to show and whether sending the same request again
+-- could plausibly succeed. A missing key or a rejected key needs the user to
+-- change the configuration first, so those never offer a retry.
 local function errorText(err)
     err = tostring(err or "")
     if err:find("API key is missing", 1, true) then
-        return _("Insightful is not configured. Copy configuration.lua.sample to configuration.lua and set api_key.")
+        return _("Insightful is not configured. Copy configuration.lua.sample to configuration.lua and set api_key."), false
     elseif err:find("HTTP 401", 1, true) or err:find("HTTP 403", 1, true) then
-        return _("The AI service rejected the API key.")
+        return _("The AI service rejected the API key."), false
     elseif err:find("invalid JSON", 1, true) or err:find("invalid response", 1, true) then
-        return _("The AI service returned an invalid response.")
+        return _("The AI service returned an invalid response."), true
     elseif err:find("AI service returned", 1, true) then
-        return _("The AI service returned an invalid response.")
+        return _("The AI service returned an invalid response."), true
     elseif err:find("output limit", 1, true) then
-        return _("The AI service reached its output limit before finishing.")
+        return _("The AI service reached its output limit before finishing."), true
     elseif err:find("context window", 1, true) then
-        return _("The conversation is too long for the AI service.")
+        return _("The conversation is too long for the AI service."), false
     elseif err:find("content was filtered", 1, true) or err:find("request was refused", 1, true) then
-        return _("The AI service did not complete this response.")
+        return _("The AI service did not complete this response."), false
     elseif err:find("Unsupported AI provider", 1, true) then
-        return err
+        return err, false
     elseif err:find("canceled", 1, true) then
-        return _("Request canceled.")
+        return _("Request canceled."), true
     end
-    return _("Couldn't reach the AI service.")
+    return _("Couldn't reach the AI service."), true
 end
 
 function Chat:_updateViewer(refresh_text_only)
     if self.closed or not self.viewer then return end
     -- The active model can change from the provider menu while a chat is open.
     self.viewer.model = self:_activeModel()
+    self.viewer.can_retry = self.can_retry == true
     self.viewer:update(
         self.conversation.messages,
         self.stream_text,
@@ -154,6 +158,7 @@ function Chat:_showConversation()
     viewer = self.viewer_class:new{
         title = _("Insightful — ") .. tostring(self.conversation.book.title or _("Book")),
         model = self:_activeModel(),
+        can_retry = self.can_retry == true,
         messages = self.conversation.messages,
         stream_text = self.stream_text,
         status = self.stream_status,
@@ -162,6 +167,7 @@ function Chat:_showConversation()
             self:send(question, self.pending_selection)
         end,
         on_stop = function() if self.busy then self:_cancelStream() end end,
+        on_retry = function() self:retry() end,
         on_chats = function()
             local plugin = self.plugin
             self:close()
@@ -254,31 +260,53 @@ function Chat:_cancelStream()
     if type(self.stream_control.cancel) == "function" then self.stream_control.cancel() end
 end
 
+-- Conditions that stop a request from starting. Checked before _send appends
+-- the question, and again before a retry re-runs it, because the reader can
+-- open another book or another chat while the failure is on screen.
+function Chat:_blockedReason()
+    local running_chat = self.plugin and self.plugin.running_chat
+    if running_chat and running_chat ~= self and running_chat.busy then
+        return _("Another chat is still working on a response. Reopen it or wait for it to finish.")
+    end
+    if not self.context.ui or self.context.ui.document ~= self.context.document then
+        return _("The open document changed. Reopen Insightful from the current book.")
+    end
+    return nil
+end
+
+function Chat:_reportBlocked(reason)
+    self.stream_text = ""
+    self.stream_status = reason
+    self.can_retry = false
+    self:_showConversation()
+    self:_updateViewer()
+end
+
 function Chat:_send(question, selection, display_content)
     question = trim(question)
     if question == "" or self.busy or self.closed then return end
-    local running_chat = self.plugin and self.plugin.running_chat
-    if running_chat and running_chat ~= self and running_chat.busy then
-        self.stream_text = ""
-        self.stream_status = _("Another chat is still working on a response. Reopen it or wait for it to finish.")
-        self:_showConversation()
-        self:_updateViewer()
+    local blocked = self:_blockedReason()
+    if blocked then
+        self:_reportBlocked(blocked)
         return
     end
-    if not self.context.ui or self.context.ui.document ~= self.context.document then
-        self.stream_text = ""
-        self.stream_status = _("The open document changed. Reopen Insightful from the current book.")
-        self:_showConversation()
-        self:_updateViewer()
-        return
-    end
-    self.busy = true
-    if self.plugin then self.plugin.running_chat = self end
     self.pending_selection = nil
     local user_message = self.agent.makeUserMessage(question, selection)
     user_message.display_content = display_content
     table.insert(self.conversation.messages, user_message)
     self:_save(true)
+    return self:_runRequest()
+end
+
+-- Runs the model against the conversation as it already stands. The user
+-- message is appended by _send, so a retry re-runs this without adding a
+-- second copy of the question. Agent.buildMessages copies into a fresh table,
+-- so a failed run never leaves a partial tool exchange behind to replay.
+function Chat:_runRequest()
+    if self.busy or self.closed then return end
+    self.can_retry = false
+    self.busy = true
+    if self.plugin then self.plugin.running_chat = self end
     self.stream_text = ""
     self.stream_status = _("Waiting for model response…")
     self:_showConversation()
@@ -347,7 +375,9 @@ function Chat:_send(question, selection, display_content)
     else
         logger.warn("Insightful: request failed:", err)
         self.stream_text = ""
-        self.stream_status = errorText(err)
+        local message, retryable = errorText(err)
+        self.stream_status = message
+        self.can_retry = retryable == true
     end
     self:_finishRun()
     self:_updateViewer()
@@ -356,6 +386,21 @@ end
 function Chat:send(question, selection, display_content)
     if Trapper:isWrapped() then return self:_send(question, selection, display_content) end
     return Trapper:wrap(function() self:_send(question, selection, display_content) end)
+end
+
+function Chat:_retry()
+    if self.busy or self.closed or not self.can_retry then return end
+    local blocked = self:_blockedReason()
+    if blocked then
+        self:_reportBlocked(blocked)
+        return
+    end
+    return self:_runRequest()
+end
+
+function Chat:retry()
+    if Trapper:isWrapped() then return self:_retry() end
+    return Trapper:wrap(function() self:_retry() end)
 end
 
 function Chat:sendQuickAction(action_key)

@@ -1108,6 +1108,99 @@ test("non-streaming request uses the background transport", function()
     same(conversation.messages[2].content, "Complete background answer.", "complete response saved")
 end)
 
+test("a failed request offers a retry that resends the same question", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local attempts = 0
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function()
+                        attempts = attempts + 1
+                        if attempts == 1 then
+                            return nil, "Couldn't reach the AI service: timeout"
+                        end
+                        return { text = "Answer after the retry." }
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 200, "", "OK" end },
+        conversation = conversation,
+        configuration = { stream = false, model = "gpt-4.1-mini" },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+
+    chat:_send("Why did this fail?")
+    same(attempts, 1, "the first attempt ran")
+    truthy(chat.can_retry, "an unreachable service offers a retry")
+    same(#conversation.messages, 1, "only the question is stored after a failure")
+
+    chat:_retry()
+    same(attempts, 2, "the retry ran a second attempt")
+    same(#conversation.messages, 2, "the retry did not repeat the question")
+    same(conversation.messages[1].role, "user", "the question is kept")
+    same(conversation.messages[2].content, "Answer after the retry.", "the retry answer is saved")
+    same(conversation.messages[2].model, "gpt-4.1-mini", "the answer records its model")
+    truthy(not chat.can_retry, "a successful retry clears the retry offer")
+end)
+
+test("a rejected API key does not offer a retry", function()
+    local document = {}
+    local conversation = {
+        id = "chat-1",
+        book = { id = "book-a", title = "Book A" },
+        messages = {},
+    }
+    local attempts = 0
+    local chat = Chat:new{
+        plugin = {},
+        agent = Agent,
+        answer_viewer_class = {},
+        book_tools_class = {
+            new = function() return { currentPosition = function() end } end,
+        },
+        provider_registry = {
+            newProvider = function()
+                return {
+                    chat = function()
+                        attempts = attempts + 1
+                        return nil, "HTTP 401 unauthorized"
+                    end,
+                }
+            end,
+        },
+        storage = { save = function() return true end },
+        stats = { record = function() return true end },
+        streaming = { httpPost = function() return true, 401, "", "" end },
+        conversation = conversation,
+        configuration = { stream = false },
+        context = { ui = { document = document }, document = document },
+    }
+    chat.viewer = { update = function() end }
+
+    chat:_send("Anything")
+    same(attempts, 1, "the request was attempted")
+    truthy(not chat.can_retry, "a rejected key needs a configuration change, not a retry")
+
+    chat:_retry()
+    same(attempts, 1, "retrying a rejected key does nothing")
+end)
+
 test("background save does not replace another active chat", function()
     local factory = memorySettingsFactory()
     local storage = Storage:new{
