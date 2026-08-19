@@ -2,6 +2,19 @@
 
 This file records user visible changes to Insightful. Dates use the year, month, and day.
 
+## 0.4.0 (2026-08-19)
+
+### Added
+
+* A failed answer now offers **Retry**, which runs the same question again without adding a second copy of it to the chat. Failures that cannot succeed on a second attempt, such as a missing or rejected API key, leave the button disabled.
+* Each answer is labelled with the model that wrote it, so a chat that spans a provider or model change shows which model produced each reply.
+* The highlighted passage menu offers **Start a new chat** when the book does not already start one. It applies to that highlight only and does not change the setting for the book.
+* A rate limited request now says so instead of reporting that the service could not be reached.
+
+### Fixed
+
+* The provider menu no longer crashes when a provider profile has no model set.
+
 ## 0.3.0 (2026-08-19)
 
 ### Added
