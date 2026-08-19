@@ -2,6 +2,12 @@
 
 This file records user visible changes to Insightful. Dates use the year, month, and day.
 
+## 0.4.1 (2026-08-19)
+
+### Fixed
+
+* **Retry** still appears after a chat is closed and reopened. A chat whose last message is an unanswered question now offers to send it again, which also survives restarting KOReader.
+
 ## 0.4.0 (2026-08-19)
 
 ### Added
