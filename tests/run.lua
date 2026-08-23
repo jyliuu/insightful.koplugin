@@ -756,7 +756,7 @@ test("quick action keeps selection text and location structured", function()
     local message = Agent.makeUserMessage(Agent.quick_actions.explain_terms, selection, 2)
     same(message.selection, selection, "selection table")
     local rendered = Agent.renderUserMessage(message)
-    contains(rendered, "Explain the important terms", "quick action instruction")
+    contains(rendered, "Give clear, concrete examples", "quick action instruction")
     contains(rendered, "Some highlighted text", "selection text")
     contains(rendered, "Chapter 7", "selection section")
     contains(rendered, "42", "selection page")
@@ -1504,6 +1504,21 @@ test("conversation renderer separates user and Markdown AI messages", function()
     contains(html, '<md># Finished answer</md>', "saved AI Markdown")
     contains(html, '<md>**Live answer**</md>', "streaming AI Markdown")
     contains(html, 'class="message-separator"', "message separator")
+end)
+
+test("conversation renderer labels current and saved example actions", function()
+    local current = ConversationRenderer.render({
+        { role = "user", content = Agent.quick_actions.explain_terms },
+    })
+    contains(current, "Give examples for this passage", "current example action label")
+
+    local saved = ConversationRenderer.render({
+        {
+            role = "user",
+            content = "Explain the important terms, expressions, references, concepts, or terminology in the selected passage that may not be obvious.",
+        },
+    })
+    contains(saved, "Explain the terms in this passage", "saved term action label")
 end)
 
 test("conversation renderer names the model beside the AI label", function()

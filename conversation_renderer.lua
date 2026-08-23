@@ -70,6 +70,8 @@ local function userMessage(message)
     if not message.display_content then
         if content:find("^Explain the selected passage clearly", 1, false) then
             content = "Explain this passage"
+        elseif content:find("^Give clear, concrete examples", 1, false) then
+            content = "Give examples for this passage"
         elseif content:find("^Explain the important terms", 1, false) then
             content = "Explain the terms in this passage"
         elseif content:find("^Explain the historical, cultural", 1, false) then

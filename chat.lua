@@ -8,7 +8,7 @@ Chat.__index = Chat
 
 local QUICK_LABELS = {
     explain = "Explain this passage",
-    explain_terms = "Explain the terms in this passage",
+    explain_terms = "Give examples for this passage",
     context_history = "Give context and history for this passage",
     people_characters = "Explain the people or characters in this passage",
 }
