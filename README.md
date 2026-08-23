@@ -89,7 +89,7 @@ The sample configuration includes the less common settings, such as timeouts, ex
 
 ## Read with Insightful
 
-Select a passage and tap **AI**. Under Zen UI, this is the sparkle icon. The menu gives you a few useful shortcuts. **Explain** deals with the passage as a whole, while **Explain terms** focuses on its vocabulary. Use **Context / history** for the setting or ideas behind a passage. Use **People / characters** when you need to know who someone is.
+Select a passage and tap **AI**. Under Zen UI, this is the sparkle icon. The menu gives you a few useful shortcuts. **Explain** deals with the passage as a whole, while **Give examples** demonstrates its meaning through concrete examples. Use **Context / history** for the setting or ideas behind a passage. Use **People / characters** when you need to know who someone is.
 
 Choose **Ask AI…** when you want to write the question yourself. The conversation opens with the keyboard closed. Tap **Message Insightful…** to start typing. The message field stays above the keyboard, and a tap in the conversation closes the keyboard again.
 

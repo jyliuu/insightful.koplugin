@@ -2,7 +2,7 @@ local Agent = {}
 
 Agent.quick_actions = {
     explain = "Explain the selected passage clearly and concisely. Focus on what is useful for understanding the passage while I am reading.",
-    explain_terms = "Explain the important terms, expressions, references, concepts, or terminology in the selected passage that may not be obvious. Keep the explanation concise and specific to this context.",
+    explain_terms = "Give clear, concrete examples that demonstrate the meaning of the selected passage. Explain how each example connects to the passage, and keep the examples concise and specific to this context.",
     context_history = "Explain the historical, cultural, philosophical, scientific, mythological, political, or other background that is useful for understanding this passage. Distinguish background knowledge from claims made by the book itself.",
     people_characters = "Identify the important people or characters in the selected passage and explain who they are and why they matter here. Use the book tools when useful.",
 }

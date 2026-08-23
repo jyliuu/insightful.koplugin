@@ -558,7 +558,7 @@ function Insightful:showHighlightActions(selection)
     local buttons = {
         {
             { text = _("Explain"), callback = function() choose("explain") end },
-            { text = _("Explain terms"), callback = function() choose("explain_terms") end },
+            { text = _("Give examples"), callback = function() choose("explain_terms") end },
         },
         {
             { text = _("Context / history"), callback = function() choose("context_history") end },

@@ -756,7 +756,7 @@ test("quick action keeps selection text and location structured", function()
     local message = Agent.makeUserMessage(Agent.quick_actions.explain_terms, selection, 2)
     same(message.selection, selection, "selection table")
     local rendered = Agent.renderUserMessage(message)
-    contains(rendered, "Explain the important terms", "quick action instruction")
+    contains(rendered, "Give clear, concrete examples", "quick action instruction")
     contains(rendered, "Some highlighted text", "selection text")
     contains(rendered, "Chapter 7", "selection section")
     contains(rendered, "42", "selection page")
@@ -1199,7 +1199,7 @@ test("retrying a highlighted action keeps the selected passage", function()
     chat.viewer = { update = function() end }
     chat.pending_selection = { text = "The selected passage text", section = "Chapter 3" }
 
-    chat:_send(Agent.quick_actions.explain, chat.pending_selection, "Explain this passage")
+    chat:_send(Agent.quick_actions.explain, chat.pending_selection)
     same(attempts, 1, "the highlighted action was attempted")
     contains(last_messages[1].content, "The selected passage text", "the first attempt sent the passage")
 
@@ -1489,21 +1489,31 @@ test("conversation renderer separates user and Markdown AI messages", function()
     local html = ConversationRenderer.render({
         {
             role = "user",
-            content = "internal quick-action prompt",
-            display_content = "Explain this passage",
+            content = Agent.quick_actions.explain_terms,
             selection = { text = "Selected <text>", section = "Chapter 2" },
         },
         { role = "assistant", content = "# Finished answer" },
     }, "**Live answer**", nil, function(text) return "<md>" .. text .. "</md>" end)
     contains(html, 'class="user-message"', "gray user message block")
     contains(html, "YOU", "user label")
-    contains(html, "Explain this passage", "displayed quick action")
-    truthy(not html:find("internal quick-action prompt", 1, true), "internal prompt is hidden")
+    contains(html, Agent.quick_actions.explain_terms, "displayed prompt")
     contains(html, "Selected &lt;text&gt;", "selection is escaped")
     contains(html, "Chapter 2", "selection location")
     contains(html, '<md># Finished answer</md>', "saved AI Markdown")
     contains(html, '<md>**Live answer**</md>', "streaming AI Markdown")
     contains(html, 'class="message-separator"', "message separator")
+end)
+
+test("conversation renderer shows the exact quick-action prompt", function()
+    local html = ConversationRenderer.render({
+        {
+            role = "user",
+            content = Agent.quick_actions.explain_terms,
+            display_content = "Give examples for this passage",
+        },
+    })
+    contains(html, Agent.quick_actions.explain_terms, "quick-action prompt")
+    truthy(not html:find("Give examples for this passage", 1, true), "short label is ignored")
 end)
 
 test("conversation renderer names the model beside the AI label", function()

@@ -6,13 +6,6 @@ local _ = require("gettext")
 local Chat = {}
 Chat.__index = Chat
 
-local QUICK_LABELS = {
-    explain = "Explain this passage",
-    explain_terms = "Explain the terms in this passage",
-    context_history = "Give context and history for this passage",
-    people_characters = "Explain the people or characters in this passage",
-}
-
 local function toolDetail(call)
     local arguments = type(call) == "table" and call.arguments
     arguments = type(arguments) == "table" and arguments or {}
@@ -298,7 +291,7 @@ function Chat:_reportBlocked(reason)
     self:_updateViewer()
 end
 
-function Chat:_send(question, selection, display_content)
+function Chat:_send(question, selection)
     question = trim(question)
     if question == "" or self.busy or self.closed then return end
     local blocked = self:_blockedReason()
@@ -308,7 +301,6 @@ function Chat:_send(question, selection, display_content)
     end
     self.pending_selection = nil
     local user_message = self.agent.makeUserMessage(question, selection)
-    user_message.display_content = display_content
     table.insert(self.conversation.messages, user_message)
     self:_save(true)
     return self:_runRequest()
@@ -399,9 +391,9 @@ function Chat:_runRequest()
     self:_updateViewer()
 end
 
-function Chat:send(question, selection, display_content)
-    if Trapper:isWrapped() then return self:_send(question, selection, display_content) end
-    return Trapper:wrap(function() self:_send(question, selection, display_content) end)
+function Chat:send(question, selection)
+    if Trapper:isWrapped() then return self:_send(question, selection) end
+    return Trapper:wrap(function() self:_send(question, selection) end)
 end
 
 function Chat:_retry()
@@ -422,7 +414,7 @@ end
 function Chat:sendQuickAction(action_key)
     local prompt = self.agent.quick_actions[action_key]
     if not prompt then return end
-    self:send(prompt, self.pending_selection, QUICK_LABELS[action_key])
+    self:send(prompt, self.pending_selection)
 end
 
 function Chat:show(quick_action)
