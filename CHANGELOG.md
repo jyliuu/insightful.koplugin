@@ -2,6 +2,16 @@
 
 This file records user visible changes to Insightful. Dates use the year, month, and day.
 
+## 0.4.2 (2026-08-23)
+
+### Added
+
+* The highlighted passage menu now offers **Give examples**, which asks the model to demonstrate the passage's meaning with clear, concrete examples.
+
+### Fixed
+
+* Quick actions now show the exact prompt sent to the model in the chat and chat title.
+
 ## 0.4.1 (2026-08-19)
 
 ### Fixed
