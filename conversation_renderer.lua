@@ -66,20 +66,7 @@ local function selectionHtml(selection)
 end
 
 local function userMessage(message)
-    local content = message.display_content or message.content or ""
-    if not message.display_content then
-        if content:find("^Explain the selected passage clearly", 1, false) then
-            content = "Explain this passage"
-        elseif content:find("^Give clear, concrete examples", 1, false) then
-            content = "Give examples for this passage"
-        elseif content:find("^Explain the important terms", 1, false) then
-            content = "Explain the terms in this passage"
-        elseif content:find("^Explain the historical, cultural", 1, false) then
-            content = "Give context and history for this passage"
-        elseif content:find("^Identify the important people or characters", 1, false) then
-            content = "Explain the people or characters in this passage"
-        end
-    end
+    local content = message.content or ""
     return table.concat({
         '<div class="user-message">',
         '<div class="role-label">YOU</div>',

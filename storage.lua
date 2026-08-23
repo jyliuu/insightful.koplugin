@@ -84,7 +84,7 @@ local function titleFromMessages(messages)
     if type(messages) ~= "table" then return nil end
     for _, message in ipairs(messages) do
         if type(message) == "table" and message.role == "user" then
-            local title = boundedTitle(message.display_content or message.content)
+            local title = boundedTitle(message.content)
             if title then return title end
         end
     end
