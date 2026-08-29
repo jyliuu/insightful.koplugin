@@ -1,6 +1,7 @@
 local script = arg[0]:gsub("\\", "/")
 local root = script:match("^(.*)/tests/run%.lua$") or "."
 
+local PromptLoader = dofile(root .. "/prompt_loader.lua")
 local Agent = dofile(root .. "/agent.lua")
 local BookTools = dofile(root .. "/book_tools.lua")
 local ConversationRenderer = dofile(root .. "/conversation_renderer.lua")
@@ -236,6 +237,58 @@ local function scriptedProvider(responses)
         end,
     }
 end
+
+test("prompt templates load and replace runtime tags", function()
+    local prompts, load_err = PromptLoader.load(root .. "/prompts", {
+        system = "system.md",
+        highlighted_question = "highlighted_question.md",
+        explain = "explain.md",
+        give_examples = "give_examples.md",
+        context_history = "context_history.md",
+        people_characters = "people_characters.md",
+    })
+    same(load_err, nil, "prompt load error")
+    truthy(prompts, "loaded prompt set")
+
+    local system, render_err = prompts:render("system", {
+        title = "100% Ready <author>",
+        author = "A. Writer",
+        position = "Chapter 3",
+    })
+    same(render_err, nil, "system prompt render error")
+    contains(system, "Title: 100% Ready <author>", "title replacement remains literal")
+    contains(system, "Author: A. Writer", "author replacement")
+    contains(system, "Current reading position: Chapter 3", "position replacement")
+    same(prompts:get("give_examples"), Agent.quick_actions.explain_terms, "quick action comes from Markdown")
+
+    local missing, missing_err = prompts:render("system", {
+        title = "The Book",
+        position = "Chapter 3",
+    })
+    same(missing, nil, "missing tag result")
+    contains(missing_err, "<author>", "missing tag error")
+end)
+
+test("highlighted prompt keeps its exact structured layout", function()
+    local rendered = Agent.renderUserMessage({
+        content = "What does this mean?",
+        selection = {
+            text = "Some highlighted text",
+            section = "Chapter 7",
+            page = 42,
+        },
+    })
+    same(rendered, table.concat({
+        "[Selected passage]",
+        "Section: Chapter 7",
+        "Page/location: 42",
+        "",
+        '"Some highlighted text"',
+        "",
+        "[Question or action]",
+        "What does this mean?",
+    }, "\n"), "highlighted prompt")
+end)
 
 test("legacy provider configuration remains available", function()
     local configuration = {
@@ -1660,7 +1713,11 @@ test("agent exposes exactly the five current book tools", function()
     same(table.concat(names, ","), "search_book,read_around,list_links,toc,current_position", "book tool names")
     truthy(schemas.list_links, "list_links schema")
     truthy(schemas.read_around.parameters.properties.link_id, "read_around link_id")
-    contains(Agent.systemPrompt({}, {}), "footnotes", "hyperlink prompt")
+    local system_prompt = Agent.systemPrompt({}, {})
+    contains(system_prompt, "Answer directly when", "direct answer guidance")
+    contains(system_prompt, "Do not call a book tool merely because one is available", "restrained tool guidance")
+    contains(system_prompt, "stop calling tools as soon as you can answer accurately", "tool stopping guidance")
+    contains(system_prompt, "footnotes", "hyperlink prompt")
 end)
 
 test("conversation renderer separates user and Markdown AI messages", function()
