@@ -16,7 +16,7 @@ package_root="$stage_root/insightful.koplugin"
 archive_path="$output_dir/$archive_name"
 trap 'rm -rf "$stage_root"' EXIT HUP INT TERM
 
-mkdir -p "$package_root/providers" "$output_dir"
+mkdir -p "$package_root/providers" "$package_root/prompts" "$output_dir"
 
 for source in "$plugin_root"/*.lua; do
     name=${source##*/}
@@ -26,6 +26,10 @@ done
 
 for source in "$plugin_root"/providers/*.lua; do
     cp "$source" "$package_root/providers/${source##*/}"
+done
+
+for source in "$plugin_root"/prompts/*.md; do
+    cp "$source" "$package_root/prompts/${source##*/}"
 done
 
 for name in VERSION CHANGELOG.md LICENSE NOTICE configuration.lua.sample; do
@@ -55,11 +59,17 @@ unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/providers/registry\.
     printf '%s\n' "package failed: providers/registry.lua is missing from the archive" >&2
     exit 1
 }
+for prompt_name in system highlighted_question explain give_examples context_history people_characters; do
+    unzip -Z1 "$archive_path" | grep -Eq "^insightful\\.koplugin/prompts/$prompt_name\\.md$" || {
+        printf '%s\n' "package failed: prompts/$prompt_name.md is missing from the archive" >&2
+        exit 1
+    }
+done
 unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/CHANGELOG\.md$' || {
     printf '%s\n' "package failed: CHANGELOG.md is missing from the archive" >&2
     exit 1
 }
-if unzip -Z1 "$archive_path" | grep -Ev '^insightful\.koplugin/([^/]+|providers/[^/]+\.lua)$' >/dev/null; then
+if unzip -Z1 "$archive_path" | grep -Ev '^insightful\.koplugin/([^/]+|providers/[^/]+\.lua|prompts/[^/]+\.md)$' >/dev/null; then
     printf '%s\n' "package failed: the archive contains an unexpected path" >&2
     exit 1
 fi
