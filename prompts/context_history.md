@@ -1,0 +1,1 @@
+Explain the historical, cultural, philosophical, scientific, mythological, political, or other background that is useful for understanding this passage. Distinguish background knowledge from claims made by the book itself.
