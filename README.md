@@ -169,6 +169,16 @@ Turn on **AI assistant** in Zen UI's highlight settings. Insightful uses this sl
 
 ## Development
 
+The model prompts are Markdown files in [`prompts`](prompts). Insightful reads them into memory when the plugin loads. It replaces angle-bracket tags with current values before each request.
+
+| Prompt | Available tags |
+| --- | --- |
+| `system.md` | `<title>`, `<author>`, `<position>` |
+| `highlighted_question.md` | `<selection_location>`, `<passage>`, `<question>` |
+| Quick-action prompts | None |
+
+Keep every tag that a template expects. A missing tag stops that prompt from being sent instead of leaving unresolved text in the request. Changes to these files take effect the next time KOReader loads the plugin.
+
 Run the checks from the plugin directory.
 
 ```sh
