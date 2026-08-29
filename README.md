@@ -95,7 +95,7 @@ Choose **Ask AI…** when you want to write the question yourself. The conversat
 
 The four shortcuts send their questions immediately. They use the current chat unless **New chat for highlighted actions** is on.
 
-When that setting is off, the highlighted passage menu also shows **Start a new chat**. Tick it before choosing an action to put that one answer in a fresh chat. It applies to that highlight only and does not change the setting for the book.
+The highlighted passage menu has a checkbox for changing the setting once. When the setting is off, tick **Start a new chat** to put the next action in a fresh chat. When the setting is on, tick **Start in existing chat** to put the next action in the current chat. The checkbox applies only to that highlight and does not change the setting for the book.
 
 Open **Insightful** from the reader menu when you want to manage chats for the current book. Choose **Chats** to see the saved chats, or tap the menu icon in an open chat. Tap a chat to open it. Hold a chat and confirm the prompt to delete it. Choose **Start new chat** when you want a blank conversation.
 
@@ -115,9 +115,9 @@ When the provider reports a request cost in US dollars, Insightful adds it to th
 
 Counts begin after you install a version that includes statistics. Insightful does not estimate token use for older saved chats.
 
-## Open the chat list with a gesture
+## Open chats with a gesture
 
-Insightful adds an action named **Insightful: show chats** to KOReader's gesture manager. Open **Taps and gestures**, then **Gesture manager**, and assign the action to a corner hold, a swipe, or a multiswipe. The assigned gesture opens the chat list for the current book without selecting text.
+Insightful adds **Insightful: show current chat** and **Insightful: show chats** to KOReader's gesture manager. Open **Taps and gestures**, then **Gesture manager**, and assign either action to a corner hold, a swipe, or a multiswipe. The first action opens the active chat for the current book. The second action opens its chat list.
 
 ## See what the model reads
 

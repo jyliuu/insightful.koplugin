@@ -154,6 +154,12 @@ function Insightful:onDispatcherRegisterActions()
         title = _("Insightful: show chats"),
         reader = true,
     })
+    Dispatcher:registerAction("insightful_show_current_chat", {
+        category = "none",
+        event = "ShowInsightfulCurrentChat",
+        title = _("Insightful: show current chat"),
+        reader = true,
+    })
 end
 
 function Insightful:captureSelection(reader_highlight)
@@ -503,13 +509,14 @@ function Insightful:startNewChat(selection, quick_action)
     self:_openConversation(conversation, selection, quick_action)
 end
 
-function Insightful:openFromHighlight(selection, quick_action, force_new_chat)
+function Insightful:openFromHighlight(selection, quick_action, new_chat_override)
     local book = self.storage:getBook(self.ui)
     local enabled, setting_err = self.storage:getNewChatOnSend(book)
     if setting_err then
         logger.warn("Insightful: highlighted-action chat setting could not be read:", setting_err)
     end
-    if enabled or force_new_chat then
+    if new_chat_override ~= nil then enabled = new_chat_override end
+    if enabled then
         return self:startNewChat(selection, quick_action)
     end
     return self:openChat(selection, quick_action)
@@ -531,6 +538,11 @@ function Insightful:onShowInsightfulChats()
     return true
 end
 
+function Insightful:onShowInsightfulCurrentChat()
+    self:openChat()
+    return true
+end
+
 -- KOReader's own CheckMark widget uses these glyphs, so they render on device.
 local CHECKED_PREFIX = "✓ "
 local UNCHECKED_PREFIX = "▢ "
@@ -544,15 +556,19 @@ function Insightful:showHighlightActions(selection)
     end
     -- A one-shot override for this highlight only. The per-book setting is
     -- never written, so the next highlight starts unticked again.
-    local start_new_chat = false
-    local function newChatText()
-        return (start_new_chat and CHECKED_PREFIX or UNCHECKED_PREFIX) .. _("Start a new chat")
+    local override_chat_setting = false
+    local override_new_chat = not always_new
+    local function chatOverrideText()
+        local prefix = override_chat_setting and CHECKED_PREFIX or UNCHECKED_PREFIX
+        local label = override_new_chat and _("Start a new chat") or _("Start in existing chat")
+        return prefix .. label
     end
     local function choose(action)
-        local force_new_chat = start_new_chat
+        local new_chat_override
+        if override_chat_setting then new_chat_override = override_new_chat end
         UIManager:close(action_dialog)
         UIManager:nextTick(function()
-            self:openFromHighlight(selection, action, force_new_chat)
+            self:openFromHighlight(selection, action, new_chat_override)
         end)
     end
     local buttons = {
@@ -568,22 +584,20 @@ function Insightful:showHighlightActions(selection)
             { text = _("Ask AI…"), callback = function() choose() end },
         },
     }
-    if not always_new then
-        table.insert(buttons, {
-            {
-                text = newChatText(),
-                id = "start_new_chat",
-                callback = function()
-                    start_new_chat = not start_new_chat
-                    local button = action_dialog and action_dialog:getButtonById("start_new_chat")
-                    if not button then return end
-                    -- Keeping the width conserves the frame, which Button:refresh needs.
-                    button:setText(newChatText(), button.width)
-                    button:refresh()
-                end,
-            },
-        })
-    end
+    table.insert(buttons, {
+        {
+            text = chatOverrideText(),
+            id = "chat_setting_override",
+            callback = function()
+                override_chat_setting = not override_chat_setting
+                local button = action_dialog and action_dialog:getButtonById("chat_setting_override")
+                if not button then return end
+                -- Keeping the width conserves the frame, which Button:refresh needs.
+                button:setText(chatOverrideText(), button.width)
+                button:refresh()
+            end,
+        },
+    })
     action_dialog = ButtonDialog:new{
         title = _("Insightful actions"),
         buttons = buttons,
@@ -689,13 +703,13 @@ function Insightful:addToMainMenu(menu_items)
                 separator = true,
             },
             {
-                text = _("Gesture shortcut"),
+                text = _("Gesture shortcuts"),
                 callback = function()
                     UIManager:show(InfoMessage:new{
-                        text = _("Open Taps and gestures, then Gesture manager. Assign Insightful: show chats to a corner, swipe, or multiswipe gesture."),
+                        text = _("Open Taps and gestures, then Gesture manager. Assign Insightful: show current chat or Insightful: show chats to a corner, swipe, or multiswipe gesture."),
                     })
                 end,
-                help_text = _("The gesture opens the chat list without selecting text."),
+                help_text = _("A gesture can open the current chat or the chat list without selecting text."),
             },
         },
     }
