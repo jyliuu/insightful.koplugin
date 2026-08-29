@@ -2,6 +2,13 @@
 
 This file records user visible changes to Insightful. Dates use the year, month, and day.
 
+## 0.5.0 (2026-08-29)
+
+### Added
+
+* The highlighted passage menu now offers a one-time choice to use the current chat or start a new chat, whichever is opposite to the saved setting.
+* KOReader's gesture manager now includes **Insightful: show current chat**, which opens the active chat directly.
+
 ## 0.4.2 (2026-08-23)
 
 ### Added
