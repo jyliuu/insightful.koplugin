@@ -78,6 +78,102 @@ local function loadChatList()
     return ChatList, ui_manager
 end
 
+local function loadInsightfulPlugin()
+    local ui_manager = { shown = {}, closed = {} }
+    function ui_manager:show(widget)
+        table.insert(self.shown, widget)
+    end
+    function ui_manager:close(widget)
+        table.insert(self.closed, widget)
+    end
+    function ui_manager:nextTick(callback)
+        callback()
+    end
+
+    local function widgetStub(on_new)
+        return {
+            new = function(_, options)
+                options = options or {}
+                if on_new then on_new(options) end
+                return options
+            end,
+        }
+    end
+
+    local button_dialog = widgetStub(function(dialog)
+        for _, row in ipairs(dialog.buttons or {}) do
+            for _, button in ipairs(row) do
+                function button:setText(text, width)
+                    self.text = text
+                    self.width = width
+                end
+                function button:refresh()
+                    self.refreshed = true
+                end
+            end
+        end
+        function dialog:getButtonById(id)
+            for _, row in ipairs(self.buttons or {}) do
+                for _, button in ipairs(row) do
+                    if button.id == id then return button end
+                end
+            end
+        end
+    end)
+
+    local dispatcher = { actions = {} }
+    function dispatcher:registerAction(name, options)
+        self.actions[name] = options
+        return true
+    end
+
+    local registry = {
+        new = function()
+            return { providerId = function() return "deepseek" end }
+        end,
+    }
+    local modules = {
+        ["ui/widget/buttondialog"] = button_dialog,
+        ["ui/widget/confirmbox"] = widgetStub(),
+        ["dispatcher"] = dispatcher,
+        ["ui/widget/infomessage"] = widgetStub(),
+        ["ui/widget/inputdialog"] = widgetStub(),
+        ["ui/trapper"] = {},
+        ["ui/uimanager"] = ui_manager,
+        ["ui/widget/container/widgetcontainer"] = {
+            extend = function(_, definition) return definition end,
+        },
+        ["logger"] = { info = function() end, warn = function() end },
+        ["util"] = {},
+        ["gettext"] = function(text) return text end,
+        ["insightful.agent"] = {},
+        ["insightful.answer_viewer"] = {},
+        ["insightful.book_tools"] = {},
+        ["insightful.chat"] = {},
+        ["insightful.chat_list"] = {},
+        ["insightful.model_catalog"] = {},
+        ["insightful.provider_profiles"] = {},
+        ["insightful.providers/registry"] = registry,
+        ["insightful.providers/openai_compatible"] = {},
+        ["insightful.providers/anthropic"] = {},
+        ["insightful.providers/openai"] = {},
+        ["insightful.providers/deepseek"] = {},
+        ["insightful.providers/openrouter"] = {},
+        ["insightful.storage"] = {},
+        ["insightful.stats"] = {},
+        ["insightful.streaming"] = {},
+    }
+    local previous = {}
+    for name, module in pairs(modules) do
+        previous[name] = package.loaded[name]
+        package.loaded[name] = module
+    end
+    local ok, result = pcall(dofile, root .. "/main.lua")
+    for name in pairs(modules) do package.loaded[name] = previous[name] end
+    if not ok then error(result, 2) end
+    return result, { dispatcher = dispatcher, ui_manager = ui_manager }
+end
+
 local passed, failed = 0, 0
 
 local function same(actual, expected, message)
@@ -897,6 +993,88 @@ test("highlighted-action chat setting supports a global default and per-book ove
 
     truthy(storage:setNewChatOnSend(book_b, false), "Book B saves a different override")
     same(storage:getNewChatOnSend(book_b), false, "Book B override wins over the global default")
+end)
+
+test("highlight actions can override either chat setting once", function()
+    local Insightful, environment = loadInsightfulPlugin()
+    local default_new_chat = false
+    local captured
+    local plugin = setmetatable({
+        ui = {},
+        storage = {
+            getBook = function() return { id = "book-a" } end,
+            getNewChatOnSend = function() return default_new_chat end,
+        },
+        openFromHighlight = function(_, selection, action, override)
+            captured = { selection = selection, action = action, override = override }
+        end,
+    }, { __index = Insightful })
+    local selection = { text = "Selected passage" }
+
+    plugin:showHighlightActions(selection)
+    local dialog = environment.ui_manager.shown[#environment.ui_manager.shown]
+    local override_button = dialog:getButtonById("chat_setting_override")
+    same(override_button.text, "▢ Start a new chat", "existing-chat default override label")
+    override_button.callback()
+    same(override_button.text, "✓ Start a new chat", "new-chat override checked label")
+    dialog.buttons[1][1].callback()
+    same(captured.selection, selection, "new-chat override selection")
+    same(captured.action, "explain", "new-chat override action")
+    same(captured.override, true, "new-chat override value")
+
+    default_new_chat = true
+    captured = nil
+    plugin:showHighlightActions(selection)
+    dialog = environment.ui_manager.shown[#environment.ui_manager.shown]
+    override_button = dialog:getButtonById("chat_setting_override")
+    same(override_button.text, "▢ Start in existing chat", "new-chat default override label")
+    override_button.callback()
+    same(override_button.text, "✓ Start in existing chat", "existing-chat override checked label")
+    dialog.buttons[1][1].callback()
+    same(captured.override, false, "existing-chat override value")
+end)
+
+test("highlight chat routing accepts true and false overrides", function()
+    local Insightful = loadInsightfulPlugin()
+    local default_new_chat = false
+    local opened
+    local plugin = setmetatable({
+        ui = {},
+        storage = {
+            getBook = function() return { id = "book-a" } end,
+            getNewChatOnSend = function() return default_new_chat end,
+        },
+        startNewChat = function() opened = "new" end,
+        openChat = function() opened = "existing" end,
+    }, { __index = Insightful })
+
+    plugin:openFromHighlight({}, "explain", true)
+    same(opened, "new", "true override starts a new chat")
+    default_new_chat = true
+    plugin:openFromHighlight({}, "explain", false)
+    same(opened, "existing", "false override opens the existing chat")
+    plugin:openFromHighlight({}, "explain")
+    same(opened, "new", "missing override keeps the book setting")
+end)
+
+test("gesture actions open the current chat and the chat list", function()
+    local Insightful, environment = loadInsightfulPlugin()
+    Insightful:onDispatcherRegisterActions()
+    local current_action = environment.dispatcher.actions.insightful_show_current_chat
+    local list_action = environment.dispatcher.actions.insightful_show_chats
+    same(current_action.event, "ShowInsightfulCurrentChat", "current-chat gesture event")
+    same(current_action.title, "Insightful: show current chat", "current-chat gesture title")
+    same(list_action.event, "ShowInsightfulChats", "chat-list gesture event")
+
+    local opened
+    local plugin = setmetatable({
+        openChat = function() opened = "current" end,
+        showChatList = function() opened = "list" end,
+    }, { __index = Insightful })
+    truthy(plugin:onShowInsightfulCurrentChat(), "current-chat gesture handled")
+    same(opened, "current", "current-chat gesture target")
+    truthy(plugin:onShowInsightfulChats(), "chat-list gesture handled")
+    same(opened, "list", "chat-list gesture target")
 end)
 
 test("version 1 conversation migrates into the first chat", function()
