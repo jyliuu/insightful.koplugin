@@ -2,6 +2,16 @@
 
 This file records user visible changes to Insightful. Dates use the year, month, and day.
 
+## 0.6.0 (2026-08-29)
+
+### Added
+
+* Model prompts now live in editable Markdown files, with runtime tags for book metadata and selected passages.
+
+### Changed
+
+* The system prompt now tells the model to answer from existing context when possible and to use book tools only when it needs more information.
+
 ## 0.5.0 (2026-08-29)
 
 ### Added
