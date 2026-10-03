@@ -101,6 +101,8 @@ Open **Insightful** from the reader menu when you want to manage chats for the c
 
 Turn on **New chat for highlighted actions** when each button chosen from the highlighted passage menu should start a separate chat. This includes **Ask AI…**. Once the chat is open, later messages continue that chat. The setting applies only to the current book.
 
+Each answer ends with a **Follow-up questions** subheader and a bullet list of two or three questions shown as underlined links. Tap one to send it as your next message in the same chat. Links are ignored while an answer is still arriving. KOReader's **Tap to follow links** setting must be on.
+
 Each answer is labelled with the model that wrote it, so a chat that spans a provider or model change still shows which model produced each reply. Answers saved before this was added are labelled **AI**.
 
 If a request fails, the error appears in the chat and **Retry** becomes available. It runs the same question again without adding a second copy of it to the chat. Failures that cannot succeed on a second attempt, such as a missing or rejected API key, leave **Retry** disabled because the configuration has to change first.
@@ -176,8 +178,9 @@ The model prompts are Markdown files in [`prompts`](prompts). Insightful reads t
 | `system.md` | `<title>`, `<author>`, `<position>` |
 | `highlighted_question.md` | `<selection_location>`, `<passage>`, `<question>` |
 | Quick-action prompts | None |
+| `follow_up_reminder.md` | None. Added after the newest user message in each request, but not shown or saved. |
 
-Keep every tag that a template expects. A missing tag stops that prompt from being sent instead of leaving unresolved text in the request. Changes to these files take effect the next time KOReader loads the plugin.
+Keep every tag that a template expects. A missing tag stops that prompt from being sent instead of leaving unresolved text in the request. In `system.md`, `<question>` is not replaced. It stays as written so the model sees the `<question>…</question>` format that the chat turns into tappable follow-up links. Changes to these files take effect the next time KOReader loads the plugin.
 
 Run the checks from the plugin directory.
 

@@ -131,10 +131,42 @@ td, th {
     border: 1px solid black;
     padding: 0.2em;
 }
+.follow-up-heading {
+    margin: 0.9em 0 0.3em 0;
+    font-size: 1em;
+    font-weight: bold;
+}
+.follow-up-list {
+    margin: 0.2em 0;
+    padding-left: 1.5em;
+}
+.follow-up-item {
+    margin: 0.5em 0;
+}
+.follow-up-question {
+    color: #000000;
+    text-decoration: underline;
+}
 ]]
 
 function ConversationViewer:_html()
-    return Renderer.render(self.messages, self.stream_text, self.status, nil, self.model)
+    local html, questions = Renderer.render(self.messages, self.stream_text, self.status, nil, self.model)
+    self.follow_up_questions = questions or {}
+    return html
+end
+
+-- A tapped follow-up link sends its question like typed input. The send
+-- waits for the next tick because it rebuilds and frees the scroll widget
+-- whose tap handler is still running.
+function ConversationViewer:_askLinkedQuestion(link)
+    local index = Renderer.questionIndex(type(link) == "table" and link.uri)
+    local question = index and self.follow_up_questions and self.follow_up_questions[index]
+    if not question or self.closed or self.busy then return end
+    self:_hideKeyboard()
+    UIManager:nextTick(function()
+        if self.closed or self.busy then return end
+        if self.on_send then self.on_send(question) end
+    end)
 end
 
 function ConversationViewer:_buildScrollWidget(outer_height)
@@ -145,6 +177,7 @@ function ConversationViewer:_buildScrollWidget(outer_height)
         width = self.width - 2 * self.text_padding - 2 * self.text_margin,
         height = outer_height - 2 * self.text_padding - 2 * self.text_margin,
         dialog = self,
+        html_link_tapped_callback = function(link) self:_askLinkedQuestion(link) end,
     }
     local original_on_tap = scroll_widget.onTapScrollText
     scroll_widget.onTapScrollText = function(widget, arg, ges)

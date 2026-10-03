@@ -2,6 +2,12 @@
 
 This file records user visible changes to Insightful. Dates use the year, month, and day.
 
+## 0.7.0 (2026-10-03)
+
+### Added
+
+* Each answer now ends with a **Follow-up questions** subheader and a list of two or three suggested questions. Tap a question to send it as your next message in the same chat.
+
 ## 0.6.0 (2026-08-29)
 
 ### Added

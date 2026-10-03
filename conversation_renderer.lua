@@ -13,6 +13,96 @@ local function plainText(text)
     return escapeHtml(text):gsub("\n", "<br/>")
 end
 
+-- MuPDF passes a lowercase "scheme://" href through unchanged as link.uri.
+-- The href holds only an index, so question text is never URL-encoded.
+local QUESTION_URI = "insightful://question/"
+local QUESTION_URI_PATTERN = "^insightful://question/(%d+)$"
+local FOLLOW_UP_HEADING = "Follow-up questions"
+
+-- Link text does not go through Markdown, so emphasis marks are removed.
+local function questionText(text)
+    return (text:gsub("%*", ""):gsub("%s+", " "):match("^%s*(.-)%s*$"))
+end
+
+-- True when a line holds only list markers, emphasis marks, or spaces.
+local function onlyMarkers(line)
+    return line:gsub("•", ""):match("^[%s%-%*%+%d%.%)]*$") ~= nil
+end
+
+-- True for a heading the model wrote over its own follow-up questions,
+-- such as "### Follow-up Questions" or "**Follow-up questions:**".
+local function isFollowUpHeading(line)
+    local key = line:lower():gsub("[#%*_:%-%s]", "")
+    return key == "followupquestions" or key == "followupquestion"
+end
+
+-- Takes the follow-up questions out of an answer. Returns the answer text
+-- without them and the list of question texts. The renderer draws the
+-- follow-up section itself, so a line that holds only question tags and the
+-- model's own follow-up heading are removed. A tag inside a sentence keeps
+-- its text in the sentence and is also listed.
+local function splitFollowUps(content)
+    content = tostring(content or ""):gsub("<question>([%s%S]-)</question>", function(text)
+        return "<question>" .. questionText(text) .. "</question>"
+    end)
+
+    -- A streamed answer can stop inside a question. Hide the unfinished
+    -- question until its closing tag arrives.
+    local last_open
+    for position in content:gmatch("()<question>") do last_open = position end
+    if last_open and not content:find("</question>", last_open, true) then
+        local line_start = content:sub(1, last_open - 1):match(".*\n()") or 1
+        if onlyMarkers(content:sub(line_start, last_open - 1)) then
+            content = content:sub(1, line_start - 1)
+        else
+            content = content:sub(1, last_open - 1)
+        end
+    end
+
+    local questions, lines = {}, {}
+    for line in (content .. "\n"):gmatch("(.-)\n") do
+        local kept = line
+        if line:find("<question>", 1, true) then
+            for text in line:gmatch("<question>(.-)</question>") do
+                if text ~= "" then table.insert(questions, text) end
+            end
+            if onlyMarkers((line:gsub("<question>.-</question>", ""))) then
+                kept = nil
+            else
+                kept = line:gsub("<question>(.-)</question>", "%1")
+            end
+        end
+        if kept then table.insert(lines, (kept:gsub("</?question>", ""))) end
+    end
+
+    if #questions > 0 then
+        local body_lines = {}
+        for _, line in ipairs(lines) do
+            if not isFollowUpHeading(line) then table.insert(body_lines, line) end
+        end
+        lines = body_lines
+    end
+    return (table.concat(lines, "\n"):gsub("%s+$", "")), questions
+end
+
+-- Builds the follow-up subheader and one list item link per question. Each
+-- question is appended to `questions`, and link number n is questions[n].
+local function followUpSection(found, questions)
+    if #found == 0 then return "" end
+    local html = {
+        '<h4 class="follow-up-heading">', FOLLOW_UP_HEADING, "</h4>",
+        '<ul class="follow-up-list">',
+    }
+    for _, text in ipairs(found) do
+        table.insert(questions, text)
+        table.insert(html, string.format(
+            '<li class="follow-up-item"><a class="follow-up-question" href="%s%d">%s</a></li>',
+            QUESTION_URI, #questions, escapeHtml(text)))
+    end
+    table.insert(html, "</ul>")
+    return table.concat(html)
+end
+
 local function renderTables(html)
     return (html:gsub("<p>([%s%S]-)</p>", function(block)
         if not block:match("^%s*|") then return nil end
@@ -83,12 +173,13 @@ local function assistantLabel(model)
     return "AI — " .. escapeHtml(model)
 end
 
-local function assistantMessage(content, markdown, streaming, model)
+local function assistantMessage(content, markdown, streaming, model, questions)
     local class = streaming and "ai-message streaming" or "ai-message"
+    local body, found = splitFollowUps(content)
     return table.concat({
         '<div class="', class, '">',
         '<div class="role-label">', assistantLabel(model), "</div>",
-        '<div class="ai-text">', markdown(content or ""), "</div>",
+        '<div class="ai-text">', markdown(body), followUpSection(found, questions), "</div>",
         "</div>",
         '<hr class="message-separator"/>',
     })
@@ -113,18 +204,21 @@ local function toolMessage(status)
     })
 end
 
+-- Returns the HTML and the list of follow-up question texts. Link number n
+-- in the HTML refers to questions[n].
 function Renderer.render(messages, stream_text, status, markdown, model)
     markdown = type(markdown) == "function" and markdown or defaultMarkdown
     local html = {}
+    local questions = {}
     for _, message in ipairs(messages or {}) do
         if message.role == "user" then
             table.insert(html, userMessage(message))
         elseif message.role == "assistant" and type(message.content) == "string" then
-            table.insert(html, assistantMessage(message.content, markdown, false, message.model))
+            table.insert(html, assistantMessage(message.content, markdown, false, message.model, questions))
         end
     end
     if stream_text and stream_text ~= "" then
-        table.insert(html, assistantMessage(stream_text, markdown, true, model))
+        table.insert(html, assistantMessage(stream_text, markdown, true, model, questions))
     elseif type(status) == "table" and status.kind == "tool" then
         table.insert(html, toolMessage(status))
     elseif status and status ~= "" then
@@ -138,9 +232,16 @@ function Renderer.render(messages, stream_text, status, markdown, model)
         }))
     end
     if #html == 0 then
-        return '<p class="empty-conversation">No conversation yet.</p>'
+        return '<p class="empty-conversation">No conversation yet.</p>', questions
     end
-    return table.concat(html, "\n")
+    return table.concat(html, "\n"), questions
+end
+
+-- Returns the question number in a follow-up link URI, or nil.
+function Renderer.questionIndex(uri)
+    if type(uri) ~= "string" then return nil end
+    local index = uri:match(QUESTION_URI_PATTERN)
+    return index and tonumber(index)
 end
 
 Renderer.escapeHtml = escapeHtml

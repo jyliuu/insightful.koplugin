@@ -254,6 +254,7 @@ test("prompt templates load and replace runtime tags", function()
         title = "100% Ready <author>",
         author = "A. Writer",
         position = "Chapter 3",
+        question = "<question>",
     })
     same(render_err, nil, "system prompt render error")
     contains(system, "Title: 100% Ready <author>", "title replacement remains literal")
@@ -1718,6 +1719,128 @@ test("agent exposes exactly the five current book tools", function()
     contains(system_prompt, "Do not call a book tool merely because one is available", "restrained tool guidance")
     contains(system_prompt, "stop calling tools as soon as you can answer accurately", "tool stopping guidance")
     contains(system_prompt, "footnotes", "hyperlink prompt")
+end)
+
+test("system prompt asks for a follow-up section in question tags", function()
+    local system_prompt = Agent.systemPrompt({ title = "The Book", authors = "A. Writer" }, {})
+    contains(system_prompt, "Always end every answer with a follow-up section in exactly this form",
+        "follow-up section instruction")
+    contains(system_prompt, table.concat({
+        "### Follow-up questions",
+        "- <question>Why does the narrator distrust this character?</question>",
+        "- <question>Where does this idea appear again later in the book?</question>",
+    }, "\n"), "literal follow-up section example")
+    contains(system_prompt, "Use <question> and </question> only inside this section", "question tag scope")
+end)
+
+test("the newest user turn sent to the model repeats the follow-up format", function()
+    local conversation = { messages = {
+        { role = "user", content = "First question" },
+        { role = "assistant", content = "First answer" },
+        {
+            role = "user",
+            content = Agent.quick_actions.explain,
+            selection = { text = "Some highlighted text", section = "Chapter 7" },
+        },
+    } }
+    local messages = Agent.buildMessages(conversation)
+    same(#messages, 3, "message count")
+    same(messages[1].content, "First question", "an earlier user turn has no reminder")
+    same(messages[2].content, "First answer", "assistant turn unchanged")
+    contains(messages[3].content, "[Question or action]\n" .. Agent.quick_actions.explain .. "\n\n[Reply format]\n",
+        "the reminder follows the newest question")
+    contains(messages[3].content, "### Follow-up questions\n- <question>question text</question>",
+        "the reminder shows the heading and the literal tag")
+    same(conversation.messages[3].content, Agent.quick_actions.explain, "stored question unchanged")
+    truthy(not Agent.renderUserMessage(conversation.messages[3]):find("[Reply format]", 1, true),
+        "the displayed prompt has no reminder")
+end)
+
+local function countText(text, fragment)
+    local count, start = 0, 1
+    while true do
+        local found = text:find(fragment, start, true)
+        if not found then return count end
+        count, start = count + 1, found + #fragment
+    end
+end
+
+local function followUpItem(index, text)
+    return string.format(
+        '<li class="follow-up-item"><a class="follow-up-question" href="insightful://question/%d">%s</a></li>',
+        index, text)
+end
+
+test("follow-up questions become a subheader and a list of links", function()
+    local markdown = function(text) return "<md>" .. text .. "</md>" end
+    -- The layout a model produced on the Kindle: bare tag lines after the answer.
+    local html, questions = ConversationRenderer.render({
+        { role = "assistant", content = "The answer.\n\n<question>First?</question>\n<question>Second?</question>\n<question>Third?</question>" },
+    }, nil, nil, markdown)
+    same(#questions, 3, "three bare-line questions")
+    contains(html, "<md>The answer.</md>", "the body keeps only the answer")
+    contains(html, table.concat({
+        '<h4 class="follow-up-heading">Follow-up questions</h4>',
+        '<ul class="follow-up-list">',
+        followUpItem(1, "First?"), followUpItem(2, "Second?"), followUpItem(3, "Third?"),
+        "</ul>",
+    }), "subheader and list follow the answer")
+    truthy(not html:find("<question>", 1, true), "no question tag reaches the HTML")
+
+    for _, heading in ipairs({ "### Follow-up Questions", "**Follow-up questions:**", "Follow up questions:" }) do
+        html, questions = ConversationRenderer.render({
+            { role = "assistant", content = "Answer.\n\n" .. heading .. "\n- <question>One?</question>\n- <question>Two?</question>" },
+        }, nil, nil, markdown)
+        same(#questions, 2, "questions under " .. heading)
+        contains(html, "<md>Answer.</md>", "model heading removed: " .. heading)
+        same(countText(html, "Follow-up questions"), 1, "one subheader for " .. heading)
+    end
+
+    html, questions = ConversationRenderer.render({
+        { role = "assistant", content = "Answer.\n1. <question>**Numbered**  one?</question>\n2) <question>\nNumbered two?\n</question>\n• <question>Bullet?</question>" },
+    }, nil, nil, markdown)
+    same(table.concat(questions, "|"), "Numbered one?|Numbered two?|Bullet?", "numbered and bullet markers")
+    contains(html, "<md>Answer.</md>", "marker lines are removed from the body")
+end)
+
+test("follow-up links are numbered across answers and hide unfinished questions", function()
+    local markdown = function(text) return "<md>" .. text .. "</md>" end
+    local html, questions = ConversationRenderer.render({
+        { role = "user", content = "First question" },
+        { role = "assistant", content = "Answer.\n- <question>Who is  Ahab?</question>\n- <question>Why <the> whale & sea?</question>" },
+        { role = "user", content = "Second question" },
+        { role = "assistant", content = "You could ask <question>What is a gam?</question> next." },
+    }, "Live.\n- <question>What next?</question>\n- <question>Unfinished", nil, markdown)
+    same(#questions, 4, "questions from two saved answers and the streaming answer")
+    same(questions[1], "Who is Ahab?", "whitespace inside a question is collapsed")
+    same(questions[2], "Why <the> whale & sea?", "question text stays unescaped for sending")
+    same(questions[3], "What is a gam?", "a question inside a sentence is listed")
+    same(questions[4], "What next?", "streaming question")
+    contains(html, followUpItem(2, "Why &lt;the&gt; whale &amp; sea?"), "link text is escaped")
+    contains(html, "<md>You could ask What is a gam? next.</md>", "a sentence keeps its question text")
+    contains(html, followUpItem(4, "What next?"), "streaming question link")
+    contains(html, "<md>Live.</md>", "an unfinished question is hidden")
+    truthy(not html:find("Unfinished", 1, true), "unfinished question text is not shown")
+    truthy(not html:find("insightful://question/5", 1, true), "an unfinished question has no link")
+    same(countText(html, "Follow-up questions"), 3, "one subheader per answer with questions")
+
+    local none
+    html, none = ConversationRenderer.render({
+        { role = "assistant", content = "No follow-ups. <question>  </question>" },
+    }, nil, nil, markdown)
+    same(#none, 0, "an empty question tag is dropped")
+    truthy(not html:find("follow-up-heading", 1, true), "no subheader without questions")
+    local _, empty = ConversationRenderer.render({})
+    same(#empty, 0, "an empty conversation has no questions")
+end)
+
+test("follow-up link URIs map back to question numbers", function()
+    same(ConversationRenderer.questionIndex("insightful://question/2"), 2, "question link")
+    same(ConversationRenderer.questionIndex("insightful://question/"), nil, "missing number")
+    same(ConversationRenderer.questionIndex("insightful://question/2x"), nil, "trailing text")
+    same(ConversationRenderer.questionIndex("https://example.com/insightful://question/2"), nil, "other URL")
+    same(ConversationRenderer.questionIndex(nil), nil, "internal link without uri")
+    same(ConversationRenderer.questionIndex(false), nil, "non-table link")
 end)
 
 test("conversation renderer separates user and Markdown AI messages", function()
