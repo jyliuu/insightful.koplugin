@@ -59,7 +59,7 @@ unzip -Z1 "$archive_path" | grep -Eq '^insightful\.koplugin/providers/registry\.
     printf '%s\n' "package failed: providers/registry.lua is missing from the archive" >&2
     exit 1
 }
-for prompt_name in system highlighted_question explain give_examples context_history people_characters; do
+for prompt_name in system highlighted_question explain give_examples context_history people_characters follow_up_reminder; do
     unzip -Z1 "$archive_path" | grep -Eq "^insightful\\.koplugin/prompts/$prompt_name\\.md$" || {
         printf '%s\n' "package failed: prompts/$prompt_name.md is missing from the archive" >&2
         exit 1
