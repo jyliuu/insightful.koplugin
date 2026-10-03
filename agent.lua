@@ -10,8 +10,11 @@ local prompts, prompt_err = PromptLoader.load(PLUGIN_DIR .. "prompts", {
     explain_terms = "give_examples.md",
     context_history = "context_history.md",
     people_characters = "people_characters.md",
+    follow_up_reminder = "follow_up_reminder.md",
 })
 if not prompts then error("Insightful prompts could not be loaded: " .. tostring(prompt_err)) end
+-- Read with get, not render: the text shows the model a literal <question> tag.
+local follow_up_reminder = assert(prompts:get("follow_up_reminder"))
 
 Agent.quick_actions = {
     explain = assert(prompts:get("explain")),
@@ -128,17 +131,29 @@ function Agent.systemPrompt(book, position)
         title = book.title or "Unknown",
         author = book.authors or "Unknown",
         position = where,
+        -- system.md shows the model the literal <question> tag for follow-up
+        -- questions. The loader treats <question> as a template tag, so it is
+        -- replaced with itself.
+        question = "<question>",
     })
 end
 
 function Agent.buildMessages(conversation)
     local messages = {}
+    local last_user
     for _, message in ipairs(conversation.messages or {}) do
         if message.role == "user" then
             table.insert(messages, { role = "user", content = Agent.renderUserMessage(message) })
+            last_user = messages[#messages]
         elseif message.role == "assistant" and type(message.content) == "string" then
             table.insert(messages, { role = "assistant", content = message.content })
         end
+    end
+    -- Some models ignore the follow-up format in the system prompt, so the
+    -- newest user turn repeats it. Only this request copy gets the reminder.
+    -- The stored and displayed message is unchanged.
+    if last_user then
+        last_user.content = last_user.content .. "\n\n" .. follow_up_reminder
     end
     return messages
 end
